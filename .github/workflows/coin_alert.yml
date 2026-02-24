@@ -1,0 +1,53 @@
+name: Coin Alert — Upbit 자동매매
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # 30분마다 실행 (24/7)
+  workflow_dispatch:           # 수동 트리거 (테스트용)
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: |
+          pip install --upgrade pip
+          pip install pyupbit pandas numpy requests matplotlib mplfinance
+
+      - name: 포트폴리오 복원
+        uses: actions/cache@v4
+        with:
+          path: |
+            portfolio.json
+            order_log.json
+          key: coin-portfolio-${{ github.run_id }}
+          restore-keys: |
+            coin-portfolio-
+
+      - name: Coin Alert 실행
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          UPBIT_ACCESS_KEY: ${{ secrets.UPBIT_ACCESS_KEY }}
+          UPBIT_SECRET_KEY: ${{ secrets.UPBIT_SECRET_KEY }}
+          INITIAL_CAPITAL: ${{ secrets.INITIAL_CAPITAL }}
+        run: python coin_alert.py
+
+      - name: 포트폴리오 저장
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            portfolio.json
+            order_log.json
+          key: coin-portfolio-${{ github.run_id }}

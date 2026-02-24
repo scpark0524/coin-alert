@@ -1,0 +1,6 @@
+portfolio.json
+order_log.json
+__pycache__/
+*.pyc
+.env
+*.log
