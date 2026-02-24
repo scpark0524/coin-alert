@@ -2,7 +2,7 @@ name: Coin Alert — Upbit 자동매매
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # 30분마다 실행 (24/7)
+    - cron: '0 */2 * * *'    # 2시간마다 실행 (24/7)
   workflow_dispatch:           # 수동 트리거 (테스트용)
 
 jobs:
