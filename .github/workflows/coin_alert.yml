@@ -38,8 +38,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          UPBIT_ACCESS_KEY: ${{ secrets.UPBIT_ACCESS_KEY }}
-          UPBIT_SECRET_KEY: ${{ secrets.UPBIT_SECRET_KEY }}
           INITIAL_CAPITAL: ${{ secrets.INITIAL_CAPITAL }}
         run: python coin_alert.py
 
