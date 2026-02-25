@@ -1,4 +1,4 @@
-# 🪙 Coin Alert v2.0 — Upbit KRW 자동매매
+# 🪙 Coin Alert v2.1 — Upbit KRW 자동매매
 
 stock-alert v7.6 로직 기반 Upbit 코인 자동매매 시스템.
 
@@ -6,8 +6,16 @@ stock-alert v7.6 로직 기반 Upbit 코인 자동매매 시스템.
 - **거래소**: Upbit KRW 마켓 (pyupbit)
 - **대상**: 거래량 상위 10종목 (BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX)
 - **신호**: 1시간봉 3-전략 앙상블 (추세추종 + 평균회귀 + 돌파) + VWAP 필터
-- **실행**: Oracle Cloud VM 30분 주기 (24/7)
+- **자동매매**: Oracle Cloud VM 30분 주기 (24/7)
+- **알림 전용**: GitHub Actions 2시간 주기
 - **알림**: 텔레그램 신호 + 차트 이미지
+
+## v2.1 변경사항
+- **서킷브레이커 _meta 오염 방지**: 알림 모드에서 _meta 갱신 차단 (`mutate_meta=False`)
+- **포지션 사이징 버그 수정**: MIN_POSITION_PCT 5%→1%, fg_mult 후 재클램프
+- **중복 주문 방지**: 타임스탬프 기반 쿨다운 (90분)
+- **일일 낙폭**: KST 기준 리셋
+- **실행 환경 이원화**: Oracle VM(자동매매) + GitHub Actions(알림 전용)
 
 ## v2.0 변경사항
 - **파라미터 최적화**: RSI 9, MACD 8/21/5, BB 15/2.0, ADX 20
@@ -62,7 +70,7 @@ python coin_alert.py
 coin-alert/
 ├── coin_alert.py           # 메인 (단일 파일)
 ├── .github/workflows/
-│   └── coin_alert.yml      # GitHub Actions (미사용, Oracle VM으로 이전)
+│   └── coin_alert.yml      # GitHub Actions (2시간마다, 알림 전용)
 ├── CLAUDE.md
 ├── README.md
 └── .gitignore

@@ -355,9 +355,10 @@ def fetch_actual_capital():
 # ============================================
 # 서킷브레이커
 # ============================================
-def check_circuit_breaker(portfolio, capital, results):
-    """포트폴리오 MDD 10% 또는 일일 낙폭 5% 이상 시 매매 중단"""
-    meta = portfolio.get("_meta", {})
+def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
+    """포트폴리오 MDD 10% 또는 일일 낙폭 5% 이상 시 매매 중단
+    mutate_meta=False: 알림 모드에서 _meta 오염 방지 (계산만, 저장 안 함)"""
+    meta = portfolio.get("_meta", {}).copy() if not mutate_meta else portfolio.get("_meta", {})
     current_value = capital
     priced_tickers = set()
     for r in results:
@@ -386,11 +387,12 @@ def check_circuit_breaker(portfolio, capital, results):
     daily_start = meta.get("daily_start_value", current_value)
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
-    meta["version"] = "2.0"
-    meta["last_value"] = round(current_value, 0)
-    meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
-    meta["daily_dd"] = round(daily_dd, 4)
-    portfolio["_meta"] = meta
+    if mutate_meta:
+        meta["version"] = "2.0"
+        meta["last_value"] = round(current_value, 0)
+        meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
+        meta["daily_dd"] = round(daily_dd, 4)
+        portfolio["_meta"] = meta
 
     if drawdown >= CIRCUIT_BREAKER_DD:
         return True, drawdown, peak_value, "MDD"
@@ -1305,7 +1307,8 @@ def main():
 
     # Phase 2: 서킷브레이커
     # v2.1: 알림 모드에서는 CB 계산이 부정확하므로 (capital=INITIAL_CAPITAL 고정) 매매 차단만 적용
-    cb_triggered, drawdown, ref_val, cb_type = check_circuit_breaker(portfolio, capital, results)
+    cb_triggered, drawdown, ref_val, cb_type = check_circuit_breaker(
+        portfolio, capital, results, mutate_meta=AUTO_TRADE_ENABLED)
     can_trade = AUTO_TRADE_ENABLED and not cb_triggered
     if cb_triggered and AUTO_TRADE_ENABLED:
         cur_val = portfolio.get('_meta', {}).get('last_value', 0)
