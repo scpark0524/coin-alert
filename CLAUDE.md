@@ -11,7 +11,7 @@
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v2.0)
+## 현재 상태 (v2.2)
 - 10종목: BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX
 - 신호 생성: 1시간봉 300개 (~12일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
@@ -40,4 +40,5 @@
 
 ## 버전 히스토리
 - v1.0: stock-alert v7.6 기반 초기 구현
+- v2.2: 매수 우선순위 정렬(앙상블 점수 내림차순), 실제 자본 전달, 알림 모드 노출 추적
 - v2.0: VWAP 필터, 부분 익절, 피라미드 매수, 일일 서킷브레이커, 공포탐욕 포지션 조정, 파라미터 최적화

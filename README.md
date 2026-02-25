@@ -1,4 +1,4 @@
-# 🪙 Coin Alert v2.1 — Upbit KRW 자동매매
+# 🪙 Coin Alert v2.2 — Upbit KRW 자동매매
 
 stock-alert v7.6 로직 기반 Upbit 코인 자동매매 시스템.
 
@@ -9,6 +9,12 @@ stock-alert v7.6 로직 기반 Upbit 코인 자동매매 시스템.
 - **자동매매**: Oracle Cloud VM 30분 주기 (24/7)
 - **알림 전용**: GitHub Actions 2시간 주기
 - **알림**: 텔레그램 신호 + 차트 이미지
+
+## v2.2 변경사항
+- **매수 우선순위 정렬**: TICKERS 리스트 순서 → 앙상블 점수 내림차순으로 변경
+- **청산 우선 처리**: CLOSE 신호를 BUY보다 먼저 실행하여 자본 확보
+- **포지션 사이징 자본 전달**: INITIAL_CAPITAL 고정 → 실제 가용 자본 반영
+- **알림 모드 노출 추적**: pending_exposure 누적으로 노출 한도 체크 정상화
 
 ## v2.1 변경사항
 - **서킷브레이커 _meta 오염 방지**: 알림 모드에서 _meta 갱신 차단 (`mutate_meta=False`)

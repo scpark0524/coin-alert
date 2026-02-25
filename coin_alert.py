@@ -1,5 +1,12 @@
 """
-🪙 Coin Alert System v2.1 — Upbit KRW 자동매매
+🪙 Coin Alert System v2.2 — Upbit KRW 자동매매
+
+v2.2: 매수 우선순위 버그 수정
+- 매매 실행 순서: TICKERS 리스트 순서 → 앙상블 점수 내림차순 정렬
+  (높은 점수 종목이 노출 한도를 우선 확보)
+- 청산 우선 처리: CLOSE 신호를 BUY보다 먼저 실행 (자본 확보)
+- 포지션 사이징: INITIAL_CAPITAL 고정 → 실제 가용 자본(capital) 전달
+- 알림 모드: pending_exposure 추적 추가 (노출 한도 체크 정상화)
 
 v2.1: 리스크 관리 버그 수정
 - 포지션 사이징: MIN_POSITION_PCT 5%→1% (RISK_BUDGET 2% 의도 보호)
@@ -388,7 +395,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "2.0"
+        meta["version"] = "2.2"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -972,7 +979,7 @@ def calc_position_size(atr_val, price, conf, bt, capital=INITIAL_CAPITAL):
 # 종합 분석
 # ============================================
 def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
-                   btc_data=None, backtest_data=None):
+                   btc_data=None, backtest_data=None, capital=INITIAL_CAPITAL):
     if len(data) < LONG_WINDOW + 2:
         return {"ticker": ticker, "signal": "NO_DATA"}
 
@@ -1048,7 +1055,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     stop_loss   = cp - atr_val * ATR_STOP_MULT   if atr_val > 0 else cp * 0.92
     take_profit = cp + atr_val * ATR_TARGET_MULT  if atr_val > 0 else cp * 1.15
 
-    ps = calc_position_size(atr_val, cp, conf, bt)
+    ps = calc_position_size(atr_val, cp, conf, bt, capital=capital)
 
     # v2.0: 공포탐욕 지수 기반 포지션 사이즈 조정 + v2.1: 재클램프
     if fear_greed and ps["position_pct"] > 0:
@@ -1139,7 +1146,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v2.0</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v2.2</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1245,7 +1252,7 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v2.0 — Upbit KRW 자동매매")
+    print(f"{'='*60}\n🪙 Coin Alert v2.2 — Upbit KRW 자동매매")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
@@ -1296,7 +1303,7 @@ def main():
             continue
         r = analyze_ticker(
             ticker, sig_df, regime_info, regime_weights, fg,
-            btc_data=btc_signal, backtest_data=bt_df,
+            btc_data=btc_signal, backtest_data=bt_df, capital=capital,
         )
         results.append(r)
         name = ticker.replace("KRW-", "")
@@ -1392,6 +1399,28 @@ def main():
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
+    # Step 2: 신호 강도 기준 정렬 (v2.2)
+    # 청산 우선 → 매수는 앙상블 점수 내림차순 → HOLD
+    # 높은 점수 종목이 노출 한도를 우선 확보
+    results_sorted = sorted(results, key=lambda x: (
+        0 if x.get("signal") in ("CLOSE", "STRONG_CLOSE") else
+        1 if x.get("signal") in ("BUY", "STRONG_BUY") else 2,
+        -abs(x.get("ensemble_score", 0))
+    ))
+    buy_order = [r for r in results_sorted if r.get("signal") in ("BUY", "STRONG_BUY")]
+    if buy_order:
+        order_str = ", ".join(
+            f"{r['ticker'].replace('KRW-', '')}({r['ensemble_score']:+.0f})"
+            for r in buy_order
+        )
+        print(f"   📊 매수 우선순위: {order_str}")
+
+    # Step 3: 매매 실행 (정렬된 순서)
+    for r in results_sorted:
+        if r["signal"] in ("NO_DATA", "HOLD"):
+            continue
+
+        ticker = r["ticker"]
         ps = r["position"]
 
         # === 매수 ===
@@ -1469,6 +1498,8 @@ def main():
                                 send_telegram(f"❌ <b>{name}</b> 매수 주문 실패 — 수동 확인 필요")
                     else:
                         signal_fired = True
+                        pending_exposure += proposed_pct
+                        pending_buy_tickers.append(ticker)
                         msg = format_signal_message(r)
                         if msg:
                             send_telegram(msg)
@@ -1514,12 +1545,15 @@ def main():
                         send_telegram_photo(chart, msg[:1024] if msg else f"{name} SELL")
                     print(f"   📋 {name} 청산 신호 ({close_reason}) ({'서킷브레이커' if cb_triggered else '알림만'})")
 
-        # 특이사항 알림
+    # 특이사항 알림
+    for r in results:
+        if r["signal"] == "NO_DATA":
+            continue
         if r.get("volume_spike"):
-            name = ticker.replace("KRW-", "")
+            name = r["ticker"].replace("KRW-", "")
             print(f"   🔊 {name} 거래량 급증 {r['volume_ratio']:.1f}x")
         if r.get("is_surge"):
-            name = ticker.replace("KRW-", "")
+            name = r["ticker"].replace("KRW-", "")
             print(f"   ⚡ {name} 급{'등' if r['daily_change'] > 0 else '락'} {r['daily_change']:+.1f}%")
 
     save_portfolio(portfolio)
