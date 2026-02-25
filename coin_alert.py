@@ -1,11 +1,12 @@
 """
 🪙 Coin Alert System v2.2 — Upbit KRW 자동매매
 
-v2.2: 매수 우선순위 버그 수정
+v2.2: 매수 우선순위 및 노출 계산 버그 수정
 - 매매 실행 순서: TICKERS 리스트 순서 → 앙상블 점수 내림차순 정렬
   (높은 점수 종목이 노출 한도를 우선 확보)
 - 청산 우선 처리: CLOSE 신호를 BUY보다 먼저 실행 (자본 확보)
-- 포지션 사이징: INITIAL_CAPITAL 고정 → 실제 가용 자본(capital) 전달
+- 노출 계산: 가용 현금 기준 → 총 자산(현금+보유) 기준으로 수정
+- 포지션 사이징: 총 자산 기반으로 정확한 비율 계산
 - 알림 모드: pending_exposure 추적 추가 (노출 한도 체크 정상화)
 
 v2.1: 리스크 관리 버그 수정
@@ -1288,8 +1289,23 @@ def main():
 
     # 포트폴리오 동기화
     portfolio = sync_portfolio_with_upbit(load_portfolio()) if AUTO_TRADE_ENABLED else load_portfolio()
-    capital   = fetch_actual_capital()
+    capital   = fetch_actual_capital()  # 가용 현금 (KRW)
     order_log = load_order_log()
+
+    # v2.2: 총 자산 = 가용 현금 + 보유 코인 가치 (노출/포지션 사이징 기준)
+    portfolio_value = 0
+    for _t, _pos in portfolio.items():
+        if _t == "_meta":
+            continue
+        _vol = _pos.get("volume", 0)
+        if _t in signal_data and len(signal_data[_t]) > 0:
+            _price = float(signal_data[_t]["Close"].iloc[-1])
+        else:
+            _price = _pos.get("entry_price", 0)
+        portfolio_value += _vol * _price
+    total_capital = capital + portfolio_value
+    if portfolio_value > 0:
+        print(f"   📊 보유 가치: {_fmt_krw(portfolio_value)} | 총 자산: {_fmt_krw(total_capital)}")
 
     # 전 종목 분석
     print("\n📊 분석 시작...")
@@ -1303,7 +1319,7 @@ def main():
             continue
         r = analyze_ticker(
             ticker, sig_df, regime_info, regime_weights, fg,
-            btc_data=btc_signal, backtest_data=bt_df, capital=capital,
+            btc_data=btc_signal, backtest_data=bt_df, capital=total_capital,
         )
         results.append(r)
         name = ticker.replace("KRW-", "")
@@ -1338,10 +1354,10 @@ def main():
     print("\n💹 매매 판단...")
     portfolio_tickers  = {k for k in portfolio if k != "_meta"}
     total_exposure     = sum(
-        portfolio[t].get("volume", 0) * r["price"] / capital
+        portfolio[t].get("volume", 0) * r["price"] / total_capital
         for r in results if r["signal"] != "NO_DATA"
         for t in [r["ticker"]] if t in portfolio
-    )
+    ) if total_capital > 0 else 0
     pending_buy_tickers = []
     pending_exposure   = 0.0
     signal_fired       = False
@@ -1465,11 +1481,22 @@ def main():
                     {t: signal_data[t] for t in signal_data},
                 )
                 proposed_pct    = ps["position_pct"] / 100
-                effective_exp   = (total_exposure + pending_exposure + proposed_pct) * corr_penalty
                 name            = ticker.replace("KRW-", "")
 
+                # v2.2: 노출 한도 내로 포지션 자동 축소
+                remaining = max(0, MAX_PORTFOLIO_EXPOSURE - total_exposure - pending_exposure)
+                max_addable = remaining / corr_penalty if corr_penalty > 0 else remaining
+                if proposed_pct > max_addable and max_addable >= MIN_POSITION_PCT:
+                    old_pct = proposed_pct
+                    proposed_pct = max_addable
+                    ps = {**ps, "position_pct": proposed_pct * 100,
+                          "position_krw": total_capital * proposed_pct}
+                    print(f"   📐 {name} 포지션 축소: {old_pct*100:.0f}% → {proposed_pct*100:.0f}% (노출 한도 맞춤)")
+
+                effective_exp   = total_exposure + (pending_exposure + proposed_pct) * corr_penalty
+
                 if effective_exp > MAX_PORTFOLIO_EXPOSURE:
-                    print(f"   ⚠️ {name} 상관조정 노출 초과 ({effective_exp*100:.0f}% > {MAX_PORTFOLIO_EXPOSURE*100:.0f}%)")
+                    print(f"   ⚠️ {name} 노출 여유 부족 ({remaining*100:.1f}% 잔여) — 매수 불가")
                 elif ps.get("method") == "BT_REJECT":
                     print(f"   ⚠️ {name} 백테스트 부적합 (Sharpe:{r['backtest'].get('sharpe', 0)}) — 매수 보류")
                 elif ps.get("method") == "SKIP":
