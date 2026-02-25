@@ -11,7 +11,7 @@
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v2.2)
+## 현재 상태 (v2.3)
 - 20종목: BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX, SUI, BCH, BERA, APT, VIRTUAL, AXL, ONDO, UNI, HBAR, NEAR
 - 신호 생성: 1시간봉 300개 (~12일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
@@ -26,7 +26,7 @@
 - 리스크: 서킷브레이커(MDD 10% + 일일 5%), 트레일링 스탑, 상관관계 패널티
 
 ## 실행 환경
-- Oracle Cloud VM: cron 30분마다 (24/7)
+- Oracle Cloud VM: cron 피크 15분(KST 21-01시, 09-10시) / 일반 30분 (24/7)
 - 의존성: pyupbit, pandas, numpy, requests, matplotlib, mplfinance
 - 환경변수: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, INITIAL_CAPITAL
 
@@ -40,5 +40,6 @@
 
 ## 버전 히스토리
 - v1.0: stock-alert v7.6 기반 초기 구현
-- v2.2: 매수 우선순위 정렬(앙상블 점수 내림차순), 실제 자본 전달, 알림 모드 노출 추적
 - v2.0: VWAP 필터, 부분 익절, 피라미드 매수, 일일 서킷브레이커, 공포탐욕 포지션 조정, 파라미터 최적화
+- v2.2: 매수 우선순위 정렬(앙상블 점수 내림차순), 실제 자본 전달, 알림 모드 노출 추적
+- v2.3: 피크 시간대 15분 실행, 텔레그램 신뢰도 소수점 제거

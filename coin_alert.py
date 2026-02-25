@@ -1,7 +1,7 @@
 """
-🪙 Coin Alert System v2.2 — Upbit KRW 자동매매
+🪙 Coin Alert System v2.3 — Upbit KRW 자동매매
 
-v2.2: 매수 우선순위 및 노출 계산 버그 수정
+v2.3: 매수 우선순위 및 노출 계산 버그 수정
 - 매매 실행 순서: TICKERS 리스트 순서 → 앙상블 점수 내림차순 정렬
   (높은 점수 종목이 노출 한도를 우선 확보)
 - 청산 우선 처리: CLOSE 신호를 BUY보다 먼저 실행 (자본 확보)
@@ -53,7 +53,7 @@ TICKERS = [
     # 대형주
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
-    # v2.2: 중소형/이종 섹터 (20종목 확대)
+    # v2.3: 중소형/이종 섹터 (20종목 확대)
     "KRW-SUI", "KRW-BCH", "KRW-BERA", "KRW-APT", "KRW-VIRTUAL",
     "KRW-AXL", "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
 ]
@@ -400,7 +400,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "2.2"
+        meta["version"] = "2.3"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -1129,7 +1129,7 @@ def format_signal_message(r):
     ticker_name = r["ticker"].replace("KRW-", "")
     msg = f"""{h} — <b>{ticker_name}</b>
 💰 {_fmt_krw(r['price'])} ({r['daily_change']:+.1f}%)
-🎯 신뢰도: {r['confidence']}/100 {get_score_grade(r['confidence'])}"""
+🎯 신뢰도: {r['confidence']:.0f}/100 {get_score_grade(r['confidence'])}"""
 
     if "BUY" in s:
         msg += f"""
@@ -1151,7 +1151,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v2.2</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v2.3</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1162,8 +1162,8 @@ def format_status_message(results, regime_info, fear_greed):
         tr   = "📈" if r["sma_short"] > r["sma_long"] else "📉"
         es   = r["ensemble_score"]
         name = r["ticker"].replace("KRW-", "")
-        if es > 0:   d = f"매수 {r['confidence']}점"
-        elif es < 0: d = f"청산 {r['confidence']}점"
+        if es > 0:   d = f"매수 {r['confidence']:.0f}점"
+        elif es < 0: d = f"청산 {r['confidence']:.0f}점"
         else:        d = "중립"
 
         msg += f"\n{tr} <b>{name}</b> {_fmt_krw(r['price'])} ({r['daily_change']:+.1f}%)"
@@ -1257,7 +1257,7 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v2.2 — Upbit KRW 자동매매")
+    print(f"{'='*60}\n🪙 Coin Alert v2.3 — Upbit KRW 자동매매")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
@@ -1296,7 +1296,7 @@ def main():
     capital   = fetch_actual_capital()  # 가용 현금 (KRW)
     order_log = load_order_log()
 
-    # v2.2: 총 자산 = 가용 현금 + 보유 코인 가치 (노출/포지션 사이징 기준)
+    # v2.3: 총 자산 = 가용 현금 + 보유 코인 가치 (노출/포지션 사이징 기준)
     portfolio_value = 0
     for _t, _pos in portfolio.items():
         if _t == "_meta":
@@ -1419,7 +1419,7 @@ def main():
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
-    # Step 2: 신호 강도 기준 정렬 (v2.2)
+    # Step 2: 신호 강도 기준 정렬 (v2.3)
     # 청산 우선 → 매수는 앙상블 점수 내림차순 → HOLD
     # 높은 점수 종목이 노출 한도를 우선 확보
     results_sorted = sorted(results, key=lambda x: (
@@ -1487,7 +1487,7 @@ def main():
                 proposed_pct    = ps["position_pct"] / 100
                 name            = ticker.replace("KRW-", "")
 
-                # v2.2: 노출 한도 내로 포지션 자동 축소
+                # v2.3: 노출 한도 내로 포지션 자동 축소
                 remaining = max(0, MAX_PORTFOLIO_EXPOSURE - total_exposure - pending_exposure)
                 max_addable = remaining / corr_penalty if corr_penalty > 0 else remaining
                 if proposed_pct > max_addable and max_addable >= MIN_POSITION_PCT:
