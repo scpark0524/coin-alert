@@ -20,7 +20,7 @@ v2.0: 코인 특화 최적화
 - 거래량 가중 돌파 스코어링 (3x 볼륨 부스트)
 
 v1.0: stock-alert v7.6 로직 기반 코인 자동매매
-- 실행: Oracle Cloud VM 2시간 주기, pyupbit API, 텔레그램 알림
+- 실행: GitHub Actions 2시간 주기, pyupbit API, 텔레그램 알림
 """
 
 import pyupbit
