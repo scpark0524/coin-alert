@@ -50,8 +50,12 @@ import mplfinance as mpf
 # 설정
 # ============================================
 TICKERS = [
+    # 대형주
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
+    # v2.2: 중소형/이종 섹터 (20종목 확대)
+    "KRW-SUI", "KRW-BCH", "KRW-BERA", "KRW-APT", "KRW-VIRTUAL",
+    "KRW-AXL", "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
 ]
 INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 3_000_000))  # KRW 300만원 기본
 

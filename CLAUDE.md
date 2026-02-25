@@ -12,7 +12,7 @@
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
 ## 현재 상태 (v2.2)
-- 10종목: BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX
+- 20종목: BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX, SUI, BCH, BERA, APT, VIRTUAL, AXL, ONDO, UNI, HBAR, NEAR
 - 신호 생성: 1시간봉 300개 (~12일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
 - 레짐 감지: BTC 1시간봉 기준

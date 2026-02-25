@@ -4,7 +4,7 @@ stock-alert v7.6 로직 기반 Upbit 코인 자동매매 시스템.
 
 ## 특징
 - **거래소**: Upbit KRW 마켓 (pyupbit)
-- **대상**: 거래량 상위 10종목 (BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX)
+- **대상**: 20종목 — 대형주(BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX) + 중소형(SUI, BCH, BERA, APT, VIRTUAL, AXL, ONDO, UNI, HBAR, NEAR)
 - **신호**: 1시간봉 3-전략 앙상블 (추세추종 + 평균회귀 + 돌파) + VWAP 필터
 - **자동매매**: Oracle Cloud VM 30분 주기 (24/7)
 - **알림 전용**: GitHub Actions 2시간 주기
