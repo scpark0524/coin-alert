@@ -1,34 +1,19 @@
 """
-🪙 Coin Alert System v2.3 — Upbit KRW 자동매매
+🪙 Coin Alert System v3.0 — Upbit KRW 자동매매
 
-v2.3: 매수 우선순위 및 노출 계산 버그 수정
-- 매매 실행 순서: TICKERS 리스트 순서 → 앙상블 점수 내림차순 정렬
-  (높은 점수 종목이 노출 한도를 우선 확보)
-- 청산 우선 처리: CLOSE 신호를 BUY보다 먼저 실행 (자본 확보)
-- 노출 계산: 가용 현금 기준 → 총 자산(현금+보유) 기준으로 수정
-- 포지션 사이징: 총 자산 기반으로 정확한 비율 계산
-- 알림 모드: pending_exposure 추적 추가 (노출 한도 체크 정상화)
+v3.0: 모멘텀 예측 전략 추가 + 매매 활성화 개선
+- 4-전략 앙상블: 추세추종 + 평균회귀 + 돌파 + 모멘텀예측(거래량+히스토리 기반)
+- 모멘텀예측 7개 하위 지표: OBV/MFI/VPT/ADL/Stochastic/VWMA/MACD히스토그램
+- MAX_PORTFOLIO_EXPOSURE 60%→80% 적극적 매매
+- VWAP 필터 완화 (0.5x→0.7x), 백테스트 거부 기준 완화 (Sharpe<-0.5, 10회)
+- 신뢰도 배율 선형 스케일, 신뢰도 하한 30→20
+- 서킷브레이커 완화: MDD 15% / 일일 8%
+- 라이브 시간 스탑 추가 (7일 보유 한도)
+- ADX 단계적 가중치 (이진→3단계)
 
-v2.1: 리스크 관리 버그 수정
-- 포지션 사이징: MIN_POSITION_PCT 5%→1% (RISK_BUDGET 2% 의도 보호)
-- 포지션 사이징: fg_mult 적용 후 MAX_POSITION_PCT 재클램프 추가
-- 중복 주문 방지: hour key → 타임스탬프 기반 쿨다운 (90분)
-- 일일 낙폭: UTC → KST 기준 리셋 (Upbit 한국 거래일 기준)
-- 서킷브레이커: 알림 모드 왜곡 방지 (추정치 경고)
-- 차트 생성: sig_df 잔존 변수 제거
-
-v2.0: 코인 특화 최적화
-- 파라미터 최적화: RSI 9, MACD 8/21/5, BB 15/2.0, ADX 20
-- 레짐 임계값 25% 인하 → 더 활발한 매매
-- VWAP 필터: 매수=가격>VWAP, 매도=가격<VWAP
-- 부분 익절: ATR×2.0에서 50% 익절 + 나머지 트레일링
-- 피라미드 매수: 승리 포지션 1회 추가 매수
-- 일일 낙폭 5% 서킷브레이커 추가
-- Quarter-Kelly, 포트폴리오 노출 60%로 축소
-- 거래량 가중 돌파 스코어링 (3x 볼륨 부스트)
-
-v1.0: stock-alert v7.6 로직 기반 코인 자동매매
-- 실행: GitHub Actions 2시간 주기, pyupbit API, 텔레그램 알림
+v2.3: 매수 우선순위 정렬, 노출 계산 버그 수정, 종목 20개 확대, 피크시간대 15분
+v2.0: VWAP, 부분 익절, 피라미드, 서킷브레이커, 공포탐욕, 파라미터 최적화
+v1.0: stock-alert v7.6 기반 코인 자동매매
 """
 
 import pyupbit
@@ -87,7 +72,7 @@ SR_PROXIMITY        = 0.015
 RISK_BUDGET             = 0.02   # 거래당 자본 리스크 2%
 MAX_POSITION_PCT        = 0.15   # 종목당 최대 15%
 MIN_POSITION_PCT        = 0.01   # v2.1: 0.05→0.01 (RISK_BUDGET 2% 의도 보호)
-MAX_PORTFOLIO_EXPOSURE  = 0.60   # v2.0: 80%→60% 현금 버퍼 확대
+MAX_PORTFOLIO_EXPOSURE  = 0.80   # v3.0: 60%→80% 적극적 매매
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -115,8 +100,8 @@ PYRAMID_MAX_ADDS       = 1     # 최대 1회 추가 매수
 PYRAMID_ATR_THRESHOLD  = 1.0   # 진입가 + ATR×1.0 이상일 때
 
 # 서킷브레이커
-CIRCUIT_BREAKER_DD = 0.10  # 포트폴리오 MDD 10% 시 매매 중단
-DAILY_DD_LIMIT     = 0.05  # v2.0: 일일 낙폭 5% 제한
+CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
+DAILY_DD_LIMIT     = 0.08  # v3.0: 5%→8% 회복 시간 확보
 
 # 중복 주문 방지 (v2.1: 타임스탬프 기반)
 ORDER_COOLDOWN_MINUTES = 90  # 동일 종목/방향 주문 최소 간격 (분)
@@ -400,7 +385,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "2.3"
+        meta["version"] = "3.0"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -564,6 +549,180 @@ def calc_vwap(data):
     return cum_tpv / cum_vol
 
 
+# ============================================
+# v3.0: 모멘텀 예측 지표 (거래량+히스토리 기반)
+# ============================================
+def calc_obv(data):
+    """OBV (On-Balance Volume) — Granville 1963"""
+    direction = np.sign(data["Close"].diff())
+    return (data["Volume"] * direction).cumsum()
+
+
+def calc_mfi(data, period=14):
+    """MFI (Money Flow Index) — 거래량 가중 RSI (Quong & Satchell 1997)"""
+    tp = (data["High"] + data["Low"] + data["Close"]) / 3
+    mf = tp * data["Volume"]
+    delta = tp.diff()
+    pos_mf = mf.where(delta > 0, 0).rolling(period).sum()
+    neg_mf = mf.where(delta <= 0, 0).rolling(period).sum()
+    return 100 - (100 / (1 + pos_mf / neg_mf.replace(0, 1e-10)))
+
+
+def calc_vpt(data):
+    """VPT (Volume Price Trend) — 누적 거래량 가중 가격 변화"""
+    return (data["Volume"] * data["Close"].pct_change()).cumsum()
+
+
+def calc_adl(data):
+    """ADL (Accumulation/Distribution Line) — 스마트머니 감지"""
+    hl_range = (data["High"] - data["Low"]).replace(0, 1e-10)
+    clv = ((data["Close"] - data["Low"]) - (data["High"] - data["Close"])) / hl_range
+    return (clv * data["Volume"]).cumsum()
+
+
+def calc_stochastic(data, k_period=5, d_period=3):
+    """Stochastic %K/%D — 단기 모멘텀 확인"""
+    low_min = data["Low"].rolling(k_period).min()
+    high_max = data["High"].rolling(k_period).max()
+    denom = (high_max - low_min).replace(0, 1e-10)
+    k = 100 * (data["Close"] - low_min) / denom
+    d = k.rolling(d_period).mean()
+    return k, d
+
+
+def calc_vwma(data, period=20):
+    """VWMA (Volume Weighted Moving Average)"""
+    return (data["Close"] * data["Volume"]).rolling(period).sum() / data["Volume"].rolling(period).sum()
+
+
+def strategy_momentum_prediction(data, today):
+    """v3.0: 모멘텀 예측 전략 — 거래량+히스토리 기반 상승 예측 모델
+
+    7개 하위 지표 복합 점수 (-100 ~ +100):
+    1. OBV 다이버전스       (±20) — 가격↓+OBV↑ = 강세 다이버전스
+    2. MFI                  (±15) — 거래량 가중 RSI, 과매도/과매수
+    3. VPT 기울기           (±15) — 누적 거래량 가중 가격 변화 추세
+    4. ADL 다이버전스       (±15) — 스마트머니 축적/분배
+    5. Stochastic %K/%D     (±10) — 과매도 영역 골든크로스
+    6. VWMA 이격도          (±10) — 가격 vs 거래량 가중 이평
+    7. MACD 히스토그램 다이버전스 (±15) — 빌딩 모멘텀
+
+    수학적 근거:
+    - OBV: Granville 1963 — 거래량은 가격에 선행
+    - MFI: Quong & Satchell 1997 — 거래량 가중 RSI
+    - VWTSMOM: Huang, Sangiorgi & Urquhart 2024 (Sharpe 2.17)
+    """
+    score = 0
+    close = data["Close"]
+    n = len(data)
+    if n < 30:
+        return 0
+
+    lookback = 14
+    # 공통: 가격 기울기 (여러 지표에서 재사용)
+    price_slope = 0.0
+    if n >= lookback + 1:
+        p_end = float(close.iloc[-1])
+        p_start = float(close.iloc[-lookback])
+        price_slope = (p_end - p_start) / max(abs(p_start), 1e-10)
+
+    # --- 1. OBV 다이버전스 (±20) ---
+    obv = calc_obv(data)
+    if n >= lookback + 1 and pd.notna(obv.iloc[-1]) and pd.notna(obv.iloc[-lookback]):
+        obv_slope = (float(obv.iloc[-1]) - float(obv.iloc[-lookback])) / max(abs(float(obv.iloc[-lookback])), 1e-10)
+        if price_slope < -0.01 and obv_slope > 0.01:
+            score += 20       # 강세 다이버전스
+        elif price_slope > 0.01 and obv_slope < -0.01:
+            score -= 20       # 약세 다이버전스
+        elif price_slope > 0 and obv_slope > 0:
+            score += 8        # 상승 확인
+        elif price_slope < 0 and obv_slope < 0:
+            score -= 8        # 하락 확인
+
+    # --- 2. MFI (±15) ---
+    mfi = calc_mfi(data)
+    if pd.notna(mfi.iloc[-1]):
+        mfi_val = float(mfi.iloc[-1])
+        if mfi_val <= 20:     score += 15   # 과매도
+        elif mfi_val <= 30:   score += 8
+        elif mfi_val >= 80:   score -= 15   # 과매수
+        elif mfi_val >= 70:   score -= 8
+
+    # --- 3. VPT 기울기 (±15) ---
+    vpt = calc_vpt(data)
+    if n >= lookback + 1 and pd.notna(vpt.iloc[-1]) and pd.notna(vpt.iloc[-lookback]):
+        vpt_recent = vpt.iloc[-lookback:].dropna()
+        if len(vpt_recent) >= lookback:
+            x = np.arange(len(vpt_recent), dtype=float)
+            y = vpt_recent.values.astype(float)
+            slope = (np.mean(x * y) - np.mean(x) * np.mean(y)) / max(np.var(x), 1e-10)
+            avg_vol = float(data["Volume"].tail(lookback).mean())
+            norm_slope = slope / max(avg_vol, 1e-10)
+            if norm_slope > 0.05:     score += 15
+            elif norm_slope > 0.01:   score += 8
+            elif norm_slope < -0.05:  score -= 15
+            elif norm_slope < -0.01:  score -= 8
+
+    # --- 4. ADL 다이버전스 (±15) ---
+    adl = calc_adl(data)
+    if n >= lookback + 1 and pd.notna(adl.iloc[-1]) and pd.notna(adl.iloc[-lookback]):
+        adl_start = float(adl.iloc[-lookback])
+        adl_norm = (float(adl.iloc[-1]) - adl_start) / max(abs(adl_start), 1e-10)
+        if price_slope < -0.01 and adl_norm > 0.01:
+            score += 15       # 축적 다이버전스
+        elif price_slope > 0.01 and adl_norm < -0.01:
+            score -= 15       # 분배 다이버전스
+        elif adl_norm > 0.02:
+            score += 5
+        elif adl_norm < -0.02:
+            score -= 5
+
+    # --- 5. Stochastic %K/%D (±10) ---
+    stoch_k, stoch_d = calc_stochastic(data)
+    if n >= 2 and pd.notna(stoch_k.iloc[-1]) and pd.notna(stoch_d.iloc[-1]):
+        k_val, d_val = float(stoch_k.iloc[-1]), float(stoch_d.iloc[-1])
+        k_prev = float(stoch_k.iloc[-2]) if pd.notna(stoch_k.iloc[-2]) else k_val
+        d_prev = float(stoch_d.iloc[-2]) if pd.notna(stoch_d.iloc[-2]) else d_val
+        if k_prev <= d_prev and k_val > d_val and k_val < 30:
+            score += 10       # 과매도 골든크로스
+        elif k_prev >= d_prev and k_val < d_val and k_val > 70:
+            score -= 10       # 과매수 데드크로스
+        elif k_val > d_val:
+            score += 3
+        elif k_val < d_val:
+            score -= 3
+
+    # --- 6. VWMA 이격도 (±10) ---
+    vwma = calc_vwma(data)
+    if pd.notna(vwma.iloc[-1]):
+        cp = float(close.iloc[-1])
+        vwma_val = float(vwma.iloc[-1])
+        deviation = (cp - vwma_val) / vwma_val if vwma_val > 0 else 0
+        if deviation > 0.02:      score += 10   # VWMA 위 2%+
+        elif deviation > 0:       score += 4
+        elif deviation < -0.02:   score -= 10   # VWMA 아래 2%+
+        elif deviation < 0:       score -= 4
+
+    # --- 7. MACD 히스토그램 다이버전스 (±15) ---
+    if "MACD_Hist" in data.columns and n >= 5:
+        hist_series = data["MACD_Hist"].tail(5).dropna()
+        if len(hist_series) >= 3:
+            hist_vals = hist_series.values
+            hist_rising = all(hist_vals[i] > hist_vals[i - 1] for i in range(1, len(hist_vals)))
+            hist_falling = all(hist_vals[i] < hist_vals[i - 1] for i in range(1, len(hist_vals)))
+            price_flat = abs(price_slope) < 0.01
+            if hist_rising and price_flat:
+                score += 15   # 빌딩 모멘텀
+            elif hist_falling and price_flat:
+                score -= 15   # 약화 모멘텀
+            elif hist_rising:
+                score += 7
+            elif hist_falling:
+                score -= 7
+
+    return max(-100, min(100, score))
+
+
 def calc_support_resistance(data, lookback=SR_LOOKBACK):
     rec = data.tail(lookback)
     hs, ls = rec["High"].values, rec["Low"].values
@@ -673,14 +832,15 @@ def get_regime_threshold(r):
 
 
 def get_regime_strategy_weights(r):
+    """v3.0: 4-전략 가중치 (추세 + 평균회귀 + 돌파 + 모멘텀예측)"""
     return {
-        "BULL":      {"trend": 0.30, "mean_revert": 0.10, "breakout": 0.60},
-        "MILD_BULL": {"trend": 0.25, "mean_revert": 0.15, "breakout": 0.60},
-        "SIDEWAYS":  {"trend": 0.15, "mean_revert": 0.40, "breakout": 0.45},
-        "MILD_BEAR": {"trend": 0.15, "mean_revert": 0.25, "breakout": 0.60},
-        "BEAR":      {"trend": 0.10, "mean_revert": 0.30, "breakout": 0.60},
-        "VOLATILE":  {"trend": 0.10, "mean_revert": 0.20, "breakout": 0.70},
-    }.get(r, {"trend": 0.20, "mean_revert": 0.20, "breakout": 0.60})
+        "BULL":      {"trend": 0.25, "mean_revert": 0.10, "breakout": 0.45, "momentum_pred": 0.20},
+        "MILD_BULL": {"trend": 0.20, "mean_revert": 0.15, "breakout": 0.45, "momentum_pred": 0.20},
+        "SIDEWAYS":  {"trend": 0.10, "mean_revert": 0.40, "breakout": 0.30, "momentum_pred": 0.20},
+        "MILD_BEAR": {"trend": 0.15, "mean_revert": 0.25, "breakout": 0.40, "momentum_pred": 0.20},
+        "BEAR":      {"trend": 0.10, "mean_revert": 0.30, "breakout": 0.40, "momentum_pred": 0.20},
+        "VOLATILE":  {"trend": 0.10, "mean_revert": 0.20, "breakout": 0.50, "momentum_pred": 0.20},
+    }.get(r, {"trend": 0.15, "mean_revert": 0.20, "breakout": 0.45, "momentum_pred": 0.20})
 
 
 # ============================================
@@ -704,8 +864,15 @@ def strategy_trend_following(data, today, yesterday):
         score += 10
     else:
         score -= 10
-    if today["ADX"] >= ADX_STRONG_TREND:
-        score += 30 if today["Plus_DI"] > today["Minus_DI"] else -30
+    # v3.0: ADX 3단계 (이진→단계적 가중치)
+    adx_val = float(today["ADX"]) if pd.notna(today.get("ADX")) else 0
+    di_sign = 1 if today["Plus_DI"] > today["Minus_DI"] else -1
+    if adx_val >= 35:
+        score += 30 * di_sign    # 강한 추세
+    elif adx_val >= ADX_STRONG_TREND:
+        score += 20 * di_sign    # 보통 추세
+    elif adx_val >= 15:
+        score += 10 * di_sign    # 약한 추세
     return max(-100, min(100, score))
 
 
@@ -762,8 +929,12 @@ def strategy_breakout(data, today):
     return max(-100, min(100, score))
 
 
-def ensemble_signal(t, m, b, w):
-    return t * w["trend"] + m * w["mean_revert"] + b * w["breakout"]
+def ensemble_signal(t, m, b, w, mp=0):
+    """v3.0: 4-전략 앙상블 (모멘텀 예측 추가)"""
+    score = t * w["trend"] + m * w["mean_revert"] + b * w["breakout"]
+    if "momentum_pred" in w:
+        score += mp * w["momentum_pred"]
+    return score
 
 
 # ============================================
@@ -808,6 +979,7 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
             strategy_mean_reversion(sd, t_bar),
             strategy_breakout(sd, t_bar),
             current_rw,
+            strategy_momentum_prediction(sd, t_bar),  # v3.0
         )
 
         atr_val = float(t_bar["ATR"]) if pd.notna(t_bar["ATR"]) else 0
@@ -955,14 +1127,14 @@ def walk_forward_backtest(data, rw, btc_data=None):
 def calc_position_size(atr_val, price, conf, bt, capital=INITIAL_CAPITAL):
     if price <= 0 or atr_val <= 0:
         return {"position_pct": 0, "position_krw": 0, "method": "SKIP", "kelly_ref": 0}
-    if conf < 30:
+    if conf < 20:  # v3.0: 30→20 임계값 근처 신호 실행
         return {"position_pct": 0, "position_krw": 0, "method": "SKIP", "kelly_ref": 0}
-    if bt.get("total_trades", 0) >= 5 and bt.get("sharpe", 0) < 0:
+    if bt.get("total_trades", 0) >= 10 and bt.get("sharpe", 0) < -0.5:  # v3.0: 소표본 오판 방지
         return {"position_pct": 0, "position_krw": 0, "method": "BT_REJECT", "kelly_ref": 0}
 
     atr_pct  = atr_val / price
     raw_pct  = RISK_BUDGET / (atr_pct * ATR_STOP_MULT)
-    conf_mult = 1.0 if conf >= 80 else 0.7 if conf >= 60 else 0.4
+    conf_mult = max(0.3, min(1.0, 0.3 + (conf - 20) * 0.7 / 80))  # v3.0: 선형 스케일 (20→0.3, 100→1.0)
     raw_pct  *= conf_mult
     position_pct = max(MIN_POSITION_PCT, min(MAX_POSITION_PCT, raw_pct))
 
@@ -1015,15 +1187,16 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     ts  = strategy_trend_following(data, t, y)
     ms  = strategy_mean_reversion(data, t)
     bks = strategy_breakout(data, t)
-    es  = ensemble_signal(ts, ms, bks, regime_weights)
+    mps = strategy_momentum_prediction(data, t)  # v3.0: 모멘텀 예측
+    es  = ensemble_signal(ts, ms, bks, regime_weights, mps)
 
     # v2.0: VWAP 필터
     vwap = calc_vwap(data)
     if vwap is not None:
-        if es > 0 and cp < vwap:      # 매수 신호인데 가격 < VWAP → 점수 50% 감소
-            es *= 0.5
-        elif es < 0 and cp > vwap:    # 매도 신호인데 가격 > VWAP → 점수 50% 감소
-            es *= 0.5
+        if es > 0 and cp < vwap:      # 매수 신호인데 가격 < VWAP → v3.0: 30% 감소 (기존 50%)
+            es *= 0.7
+        elif es < 0 and cp > vwap:    # 매도 신호인데 가격 > VWAP → v3.0: 30% 감소
+            es *= 0.7
 
     threshold = get_regime_threshold(regime_info["regime"])
 
@@ -1056,6 +1229,8 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
         fg = fear_greed["score"]
         if (es > 0 and fg <= 30) or (es < 0 and fg >= 70):
             conf = min(100, conf + 5)
+
+    conf = round(conf)  # v3.0: 정수 변환
 
     stop_loss   = cp - atr_val * ATR_STOP_MULT   if atr_val > 0 else cp * 0.92
     take_profit = cp + atr_val * ATR_TARGET_MULT  if atr_val > 0 else cp * 1.15
@@ -1094,7 +1269,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
         "is_surge": abs(dc) >= PRICE_CHANGE_THRESHOLD,
         "support": sr["support"], "resistance": sr["resistance"],
         "near_support": sr["near_support"], "near_resistance": sr["near_resistance"],
-        "trend_score": ts, "mean_rev_score": ms, "breakout_score": bks,
+        "trend_score": ts, "mean_rev_score": ms, "breakout_score": bks, "momentum_pred_score": mps,
         "ensemble_score": es, "confidence": conf, "vwap": vwap,
         "backtest": bt, "weekly": wk, "position": ps,
     }
@@ -1139,7 +1314,8 @@ def format_signal_message(r):
     msg += f"""
 📊 지지 {_fmt_krw(r['support'])} | 저항 {_fmt_krw(r['resistance'])}
 📈 백테스트({bt['total_trades']}회): 승률 {bt['win_rate']*100:.0f}% 평균{bt['avg_pnl']:+.1f}%
-📐 Sharpe {bt['sharpe']:.1f} | MDD {bt['max_dd']:.0f}% | Calmar {bt['calmar']:.1f}"""
+📐 Sharpe {bt['sharpe']:.1f} | MDD {bt['max_dd']:.0f}% | Calmar {bt['calmar']:.1f}
+🔮 모멘텀예측: {r.get('momentum_pred_score', 0):+.0f}"""
 
     al = []
     if r["volume_spike"]: al.append(f"거래량 {r['volume_ratio']:.1f}x")
@@ -1151,7 +1327,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v2.3</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v3.0</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1257,7 +1433,7 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v2.3 — Upbit KRW 자동매매")
+    print(f"{'='*60}\n🪙 Coin Alert v3.0 — Upbit KRW 자동매매")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
@@ -1328,7 +1504,7 @@ def main():
         results.append(r)
         name = ticker.replace("KRW-", "")
         print(f"   {name}: {r['signal']} (앙상블:{r['ensemble_score']:+.1f} 신뢰:{r['confidence']}/100 "
-              f"RSI:{r['rsi']:.0f} ADX:{r['adx']:.0f})")
+              f"RSI:{r['rsi']:.0f} ADX:{r['adx']:.0f} 모멘텀:{r.get('momentum_pred_score', 0):+.0f})")
         print(f"      손절:{_fmt_krw(r['stop_loss'])} 익절:{_fmt_krw(r['take_profit'])} "
               f"Sharpe:{r['backtest']['sharpe']:.1f}")
 
@@ -1414,6 +1590,23 @@ def main():
                     r["close_reason"] = "TRAILING_STOP"
                     name = ticker.replace("KRW-", "")
                     print(f"   🛡️ {name} 트레일링 스탑: 고점{_fmt_krw(current_hw)} → 스탑{_fmt_krw(t_stop)}")
+
+            # v3.0: 시간 스탑 — 보유 기간 MAX_HOLD_DAYS 초과 시 청산
+            if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
+                entry_date_str = pos.get("entry_date")
+                if entry_date_str and entry_date_str != "synced":
+                    try:
+                        entry_dt = datetime.fromisoformat(entry_date_str)
+                        if entry_dt.tzinfo is None:
+                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                        hold_days = (utc_now() - entry_dt).total_seconds() / 86400
+                        if hold_days >= MAX_HOLD_DAYS:
+                            r["signal"] = "CLOSE"
+                            r["close_reason"] = "TIME_STOP"
+                            name = ticker.replace("KRW-", "")
+                            print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 보유 (한도 {MAX_HOLD_DAYS}일)")
+                    except (ValueError, TypeError):
+                        pass
 
         # CLOSE 신호: 미보유 시 HOLD
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
