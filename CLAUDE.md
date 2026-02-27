@@ -11,7 +11,7 @@
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v3.2)
+## 현재 상태 (v3.3)
 - 20종목: BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX, SUI, BCH, BERA, APT, VIRTUAL, AXL, ONDO, UNI, HBAR, NEAR
 - 신호 생성: 1시간봉 300개 (~12일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
@@ -26,17 +26,19 @@
 - 피라미드 매수: 승리 포지션 1회 추가 (진입가+ATR×1.0)
 - 리스크: 서킷브레이커(MDD 15% + 일일 8%), 트레일링 스탑(ATR×2.0), 시간 스탑(7일), 상관관계 패널티
 - **v3.2 핵심**: 손절 후 24시간 쿨다운 (같은 종목 재진입 금지) → 휩소 방지, 승률 46%→59%
+- **v3.3 핵심**: 최소 보유 3시간 (진입 직후 노이즈 스탑 방지) → 승률 57%→59%
 
 ## 실행 환경
 - Oracle Cloud VM: cron 피크 15분(KST 21-01시, 09-10시) / 일반 30분 (24/7)
 - 의존성: pyupbit, pandas, numpy, requests, matplotlib, mplfinance
 - 환경변수: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, INITIAL_CAPITAL
 
-## 주요 파라미터 (v3.2)
+## 주요 파라미터 (v3.3)
 - RSI 9 / MACD 8/21/5 / BB 15/2.0 / ADX 15/20/35 (3단계)
 - ATR_STOP_MULT = 2.0, ATR_TARGET_MULT = 4.0
 - ATR_PARTIAL_TARGET_MULT = 2.0, PARTIAL_SELL_RATIO = 0.5
 - STOP_COOLDOWN_HOURS = 24 (스탑 후 재진입 쿨다운)
+- MIN_HOLD_HOURS = 3 (최소 보유시간, 스탑 유예)
 - SIGNAL_THRESHOLD = 15, MAX_HOLD_DAYS = 7
 - KELLY_FRACTION = 0.25, MAX_PORTFOLIO_EXPOSURE = 0.80
 - DAILY_DD_LIMIT = 0.08, CIRCUIT_BREAKER_DD = 0.15
@@ -48,3 +50,4 @@
 - v2.3: 피크 시간대 15분 실행, 종목 20개 확대, 텔레그램 신뢰도 소수점 제거
 - v3.0: 모멘텀 예측 전략(4번째 전략), 노출 80%, 서킷브레이커 완화, VWAP 완화, 시간 스탑
 - v3.2: 빠른 손절(ATR×2.0) + 24h 쿨다운 → BTC -3.7% 하락장에서 +5.7% 수익
+- v3.3: 최소 보유 3시간 (진입 직후 노이즈 스탑 방지)

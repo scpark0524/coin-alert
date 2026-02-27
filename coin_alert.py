@@ -1,6 +1,7 @@
 """
-🪙 Coin Alert System v3.2 — Upbit KRW 자동매매
+🪙 Coin Alert System v3.3 — Upbit KRW 자동매매
 
+v3.3: 최소 보유 3시간 (진입 직후 노이즈 스탑 방지)
 v3.2: 수익 구조 전환 (10일 백테스트 기반 최적화)
 - 빠른 손절: ATR×2.5→2.0 (신속 손절 + 쿨다운 보호)
 - 손절 후 쿨다운: 스탑 발동 후 같은 종목 24시간 재진입 금지 (휩소 방지)
@@ -89,6 +90,7 @@ ATR_TARGET_MULT = 4.0   # 더 넓은 수익 타겟
 ATR_PARTIAL_TARGET_MULT = 2.0  # v3.2: 1.5→2.0 복원 (기본값 최적)
 PARTIAL_SELL_RATIO      = 0.5  # v2.0: 50% 부분 익절
 STOP_COOLDOWN_HOURS     = 24   # v3.2: 스탑 후 재진입 쿨다운 (핵심)
+MIN_HOLD_HOURS          = 3    # v3.3: 최소 보유시간 (진입 직후 스탑 방지)
 MAX_HOLD_DAYS   = 7     # v2.0: 14→7 코인 모멘텀 2-7일
 SIGNAL_THRESHOLD = 15   # v2.0: 20→15 더 활발한 신호
 
@@ -383,7 +385,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "3.2"
+        meta["version"] = "3.3"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -1325,7 +1327,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v3.2</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v3.3</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1431,7 +1433,7 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v3.2 — Upbit KRW 자동매매")
+    print(f"{'='*60}\n🪙 Coin Alert v3.3 — Upbit KRW 자동매매")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
@@ -1584,11 +1586,25 @@ def main():
                 prev_stop  = pos.get("trailing_stop", 0)
                 t_stop     = max(new_stop, prev_stop)
                 pos["trailing_stop"] = t_stop
-                if r["price"] <= t_stop:
+                # v3.3: 최소 보유시간 이후에만 트레일링 스탑 적용
+                hold_hours = 0
+                entry_date_str = pos.get("entry_date")
+                if entry_date_str and entry_date_str != "synced":
+                    try:
+                        entry_dt = datetime.fromisoformat(entry_date_str)
+                        if entry_dt.tzinfo is None:
+                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                        hold_hours = (utc_now() - entry_dt).total_seconds() / 3600
+                    except (ValueError, TypeError):
+                        hold_hours = MIN_HOLD_HOURS  # 파싱 실패 시 스탑 허용
+                if r["price"] <= t_stop and hold_hours >= MIN_HOLD_HOURS:
                     r["signal"] = "CLOSE"
                     r["close_reason"] = "TRAILING_STOP"
                     name = ticker.replace("KRW-", "")
                     print(f"   🛡️ {name} 트레일링 스탑: 고점{_fmt_krw(current_hw)} → 스탑{_fmt_krw(t_stop)}")
+                elif r["price"] <= t_stop:
+                    name = ticker.replace("KRW-", "")
+                    print(f"   ⏳ {name} 스탑 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
 
             # v3.0: 시간 스탑 — 보유 기간 MAX_HOLD_DAYS 초과 시 청산
             if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
