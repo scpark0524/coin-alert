@@ -1,16 +1,13 @@
 """
-🪙 Coin Alert System v3.0 — Upbit KRW 자동매매
+🪙 Coin Alert System v3.2 — Upbit KRW 자동매매
 
-v3.0: 모멘텀 예측 전략 추가 + 매매 활성화 개선
-- 4-전략 앙상블: 추세추종 + 평균회귀 + 돌파 + 모멘텀예측(거래량+히스토리 기반)
-- 모멘텀예측 7개 하위 지표: OBV/MFI/VPT/ADL/Stochastic/VWMA/MACD히스토그램
-- MAX_PORTFOLIO_EXPOSURE 60%→80% 적극적 매매
-- VWAP 필터 완화 (0.5x→0.7x), 백테스트 거부 기준 완화 (Sharpe<-0.5, 10회)
-- 신뢰도 배율 선형 스케일, 신뢰도 하한 30→20
-- 서킷브레이커 완화: MDD 15% / 일일 8%
-- 라이브 시간 스탑 추가 (7일 보유 한도)
-- ADX 단계적 가중치 (이진→3단계)
+v3.2: 수익 구조 전환 (10일 백테스트 기반 최적화)
+- 빠른 손절: ATR×2.5→2.0 (신속 손절 + 쿨다운 보호)
+- 손절 후 쿨다운: 스탑 발동 후 같은 종목 24시간 재진입 금지 (휩소 방지)
+- v3.1 필터 제거: RSI/BEAR/F&G 차단은 오히려 수익 감소 (시뮬레이션 검증)
+- 10일 백테스트 결과: BTC -3.7% 하락장에서 +5.7% 수익, 59% 승률
 
+v3.0: 모멘텀 예측 전략, 노출 80%, 서킷브레이커 완화, VWAP 완화, 시간 스탑
 v2.3: 매수 우선순위 정렬, 노출 계산 버그 수정, 종목 20개 확대, 피크시간대 15분
 v2.0: VWAP, 부분 익절, 피라미드, 서킷브레이커, 공포탐욕, 파라미터 최적화
 v1.0: stock-alert v7.6 기반 코인 자동매매
@@ -87,10 +84,11 @@ TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 
 # ATR 기반 리스크 (코인: 더 넓은 스탑/타겟)
 ATR_PERIOD      = 14
-ATR_STOP_MULT   = 2.5   # 코인 변동성 반영
+ATR_STOP_MULT   = 2.0   # v3.2: 2.5→2.0 빠른 손절 (쿨다운 보호)
 ATR_TARGET_MULT = 4.0   # 더 넓은 수익 타겟
-ATR_PARTIAL_TARGET_MULT = 2.0  # v2.0: 부분 익절 타겟
+ATR_PARTIAL_TARGET_MULT = 2.0  # v3.2: 1.5→2.0 복원 (기본값 최적)
 PARTIAL_SELL_RATIO      = 0.5  # v2.0: 50% 부분 익절
+STOP_COOLDOWN_HOURS     = 24   # v3.2: 스탑 후 재진입 쿨다운 (핵심)
 MAX_HOLD_DAYS   = 7     # v2.0: 14→7 코인 모멘텀 2-7일
 SIGNAL_THRESHOLD = 15   # v2.0: 20→15 더 활발한 신호
 
@@ -385,7 +383,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "3.0"
+        meta["version"] = "3.2"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -1327,7 +1325,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v3.0</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v3.2</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1433,7 +1431,7 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v3.0 — Upbit KRW 자동매매")
+    print(f"{'='*60}\n🪙 Coin Alert v3.2 — Upbit KRW 자동매매")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
@@ -1560,6 +1558,7 @@ def main():
             # v2.0: 부분 익절 — ATR×2.0 도달 시 50% 매도
             if r["atr"] > 0 and not pos.get("partial_taken"):
                 partial_target = entry_p + r["atr"] * ATR_PARTIAL_TARGET_MULT
+                pnl_check = (r["price"] / entry_p - 1) * 100
                 if r["price"] >= partial_target:
                     name = ticker.replace("KRW-", "")
                     vol = pos.get("volume", 0)
@@ -1638,10 +1637,23 @@ def main():
 
         # === 매수 ===
         if r["signal"] in ["BUY", "STRONG_BUY"]:
+            name = ticker.replace("KRW-", "")
+
+            # v3.2: 손절 쿨다운 — 최근 스탑 발동 후 STOP_COOLDOWN_HOURS 이내 재진입 차단
+            stop_cd_key = f"{ticker}_STOP_CD"
+            stop_cd_time = order_log.get(stop_cd_key)
+            if stop_cd_time and ticker not in portfolio:
+                try:
+                    cd_dt = datetime.fromisoformat(stop_cd_time)
+                    cd_elapsed = (utc_now() - cd_dt).total_seconds() / 3600
+                    if cd_elapsed < STOP_COOLDOWN_HOURS:
+                        print(f"   ⏳ {name} 스탑 쿨다운 ({cd_elapsed:.1f}h < {STOP_COOLDOWN_HOURS}h)")
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
             if ticker in portfolio:
-                name = ticker.replace("KRW-", "")
                 pos = portfolio[ticker]
-                # v2.0: 피라미드 매수 — 가격 > 진입가+ATR×1.0 & 최대 1회
                 pyramid_ok = (
                     PYRAMID_ENABLED
                     and r["atr"] > 0
@@ -1748,6 +1760,10 @@ def main():
                             signal_fired = True
                             entry_p = portfolio[ticker]["entry_price"]
                             pnl     = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
+                            # v3.2: 스탑 매도 시 쿨다운 기록
+                            if close_reason == "TRAILING_STOP":
+                                order_log[f"{ticker}_STOP_CD"] = utc_now().isoformat()
+                                save_order_log(order_log)
                             send_telegram(
                                 f"📤 <b>{name}</b> 매도 주문 접수 ({close_reason})\n"
                                 f"{vol} @ {_fmt_krw(r['price'])}\n"
