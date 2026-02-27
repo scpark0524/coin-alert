@@ -1573,6 +1573,10 @@ def main():
                             pos["partial_taken"] = True
                             pos["volume"] = vol - sell_vol
                             signal_fired = True
+                            # v3.3: 부분 매도 후 노출/자본 즉시 갱신 (같은 사이클 재매수 허용)
+                            sold_value = sell_vol * r["price"]
+                            total_exposure = max(0, total_exposure - sold_value / total_capital)
+                            capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                             send_telegram(
                                 f"💰 <b>{name}</b> 부분 익절 (50%)\n"
                                 f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl:+.1f}%)\n"
@@ -1780,6 +1784,12 @@ def main():
                             if close_reason == "TRAILING_STOP":
                                 order_log[f"{ticker}_STOP_CD"] = utc_now().isoformat()
                                 save_order_log(order_log)
+                            # v3.3: 매도 후 포트폴리오/노출/자본 즉시 갱신 (같은 사이클 재매수 허용)
+                            sold_value = vol * r["price"]
+                            del portfolio[ticker]
+                            portfolio_tickers.discard(ticker)
+                            total_exposure = max(0, total_exposure - sold_value / total_capital)
+                            capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                             send_telegram(
                                 f"📤 <b>{name}</b> 매도 주문 접수 ({close_reason})\n"
                                 f"{vol} @ {_fmt_krw(r['price'])}\n"
