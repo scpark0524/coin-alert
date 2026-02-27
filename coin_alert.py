@@ -1806,7 +1806,8 @@ def main():
     else:
         print("   보유 없음")
 
-    if not signal_fired:
+    # v3.2: VM은 매수/매도 시에만 텔레그램, 리포트는 GitHub Actions(알림 모드)에서만
+    if not signal_fired and not AUTO_TRADE_ENABLED:
         status_msg = format_status_message(results, regime_info, fg)
         send_telegram(status_msg)
 
