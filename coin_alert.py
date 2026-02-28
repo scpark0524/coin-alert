@@ -1591,7 +1591,7 @@ def main():
                 t_stop     = max(new_stop, prev_stop)
                 pos["trailing_stop"] = t_stop
                 # v3.3: 최소 보유시간 이후에만 트레일링 스탑 적용
-                hold_hours = 0
+                hold_hours = MIN_HOLD_HOURS  # 기본값: 스탑 허용 (synced/누락 시)
                 entry_date_str = pos.get("entry_date")
                 if entry_date_str and entry_date_str != "synced":
                     try:
@@ -1600,7 +1600,7 @@ def main():
                             entry_dt = entry_dt.replace(tzinfo=timezone.utc)
                         hold_hours = (utc_now() - entry_dt).total_seconds() / 3600
                     except (ValueError, TypeError):
-                        hold_hours = MIN_HOLD_HOURS  # 파싱 실패 시 스탑 허용
+                        pass  # 기본값 MIN_HOLD_HOURS 유지
                 if r["price"] <= t_stop and hold_hours >= MIN_HOLD_HOURS:
                     r["signal"] = "CLOSE"
                     r["close_reason"] = "TRAILING_STOP"
@@ -1743,6 +1743,15 @@ def main():
                                 pending_exposure += proposed_pct
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
+                                # v3.3 fix: 매수 즉시 portfolio에 추가 (entry_date 보존)
+                                est_vol = ps["position_krw"] / r["price"]
+                                portfolio[ticker] = {
+                                    "volume": est_vol,
+                                    "entry_price": r["price"],
+                                    "entry_date": utc_now().isoformat(),
+                                    "high_watermark": r["price"],
+                                }
+                                portfolio_tickers.add(ticker)
                                 send_telegram(
                                     f"📥 <b>{name}</b> 매수 주문 접수\n"
                                     f"{_fmt_krw(ps['position_krw'])} ({ps['position_pct']:.0f}%)\n"
@@ -1780,10 +1789,11 @@ def main():
                             signal_fired = True
                             entry_p = portfolio[ticker]["entry_price"]
                             pnl     = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
-                            # v3.2: 스탑 매도 시 쿨다운 기록
-                            if close_reason == "TRAILING_STOP":
+                            # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
+                            if pnl < 0:
                                 order_log[f"{ticker}_STOP_CD"] = utc_now().isoformat()
                                 save_order_log(order_log)
+                                print(f"   ⏳ {name} 쿨다운 {STOP_COOLDOWN_HOURS}h 설정 (손실 {pnl:+.1f}%)")
                             # v3.3: 매도 후 포트폴리오/노출/자본 즉시 갱신 (같은 사이클 재매수 허용)
                             sold_value = vol * r["price"]
                             del portfolio[ticker]
