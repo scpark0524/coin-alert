@@ -90,18 +90,21 @@ TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 ATR_PERIOD      = 14
 ATR_STOP_MULT   = 2.0           # 백테스트 호환용
 ATR_TARGET_MULT = 4.0           # 백테스트 호환용
-PROFIT_TARGET_PCT    = 6.0      # v4.0 NEW: +6% 도달 시 매도
-LOSS_CUT_PCT         = 4.0      # v4.0 NEW: -4% 도달 시 손절 (R:R 1:1.5)
-REBUY_DROP_PCT       = 5.0      # v4.0 NEW: 매도가 대비 5% 하락 후에만 재매수
+PROFIT_TARGET_1ST    = 4.0      # v4.0: 1차 익절 +4% → 절반 매도
+PROFIT_TARGET_2ND    = 8.0      # v4.0: 2차 익절 +8% → 나머지 전량 매도
+PARTIAL_SELL_RATIO   = 0.5      # v4.0: 1차 익절 시 매도 비율 (50%)
+LOSS_CUT_PCT         = 4.0      # v4.0: -4% 도달 시 손절
+REBUY_DROP_PCT       = 5.0      # v4.0: 매도가 대비 5% 하락 후에만 재매수
 STOP_COOLDOWN_HOURS  = 24       # 손절 후 재진입 쿨다운
 MIN_HOLD_HOURS       = 3        # 최소 보유시간
-MAX_HOLD_DAYS        = 10       # v4.0: 7→10 평균회귀 여유 확보
-SIGNAL_THRESHOLD     = 20       # v4.0: 15→20 더 엄격한 신호
+MAX_HOLD_DAYS        = 10       # v4.0: 평균회귀 여유 확보
+SIGNAL_THRESHOLD     = 20       # v4.0: 더 엄격한 신호
 
-# 피라미드 매수 (v4.0: 비활성화)
-PYRAMID_ENABLED        = False   # v4.0: 비활성화
-PYRAMID_MAX_ADDS       = 1
-PYRAMID_ATR_THRESHOLD  = 1.0
+# v4.0: 분할매수 (평균회귀식 — 떨어지면 추가 매수)
+DCA_ENABLED            = True    # v4.0: 분할매수 활성화
+DCA_DROP_PCT           = 3.0     # 진입가 대비 3% 추가 하락 시 2차 매수
+DCA_MAX_ADDS           = 1       # 최대 1회 추가 매수
+DCA_ADD_RATIO          = 0.5     # 초기 금액의 50% 추가 매수
 
 # 서킷브레이커
 CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
@@ -311,11 +314,11 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("high_watermark", "trailing_stop", "entry_date", "partial_taken", "pyramid_count"):
+                for key in ("entry_date", "partial_taken", "dca_count"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
-            if "high_watermark" not in actual[t]:
-                actual[t]["high_watermark"] = actual[t]["entry_price"]
+            if "dca_count" not in actual[t]:
+                actual[t]["dca_count"] = 0
         # _meta, _sell_memory 보존
         if "_meta" in local:
             actual["_meta"] = local["_meta"]
@@ -1006,16 +1009,22 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
         if pos is None:
             if total >= current_threshold:
                 entry_price = next_open * (1 + cost_pct)
-                pos = {"entry": entry_price, "idx": i + 1}
+                pos = {"entry": entry_price, "idx": i + 1, "partial": False}
         else:
             hold_days = i - pos["idx"]
             cp = float(t_bar["Close"])
             pnl_pct = (cp / pos["entry"] - 1) * 100
 
-            # v4.0: 고정 수익률/손절 기반 청산 (트레일링 스탑 제거)
+            # v4.0: 분할 익절 반영 (1차 +4% 절반, 2차 +8% 전량)
+            # 백테스트에서는 1차 익절의 수익을 절반 PnL로 기록하고 계속 보유
+            if pnl_pct >= PROFIT_TARGET_1ST and not pos["partial"]:
+                partial_pnl = pnl_pct * PARTIAL_SELL_RATIO  # 절반의 수익
+                trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL", "entry_idx": pos["idx"]})
+                pos["partial"] = True
+
             exit_reason = None
             exit_price  = None
-            if pnl_pct >= PROFIT_TARGET_PCT:
+            if pnl_pct >= PROFIT_TARGET_2ND:
                 exit_reason = "PROFIT_TARGET"
                 exit_price  = cp * (1 - cost_pct)
             elif pnl_pct <= -LOSS_CUT_PCT:
@@ -1030,7 +1039,9 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
 
             if exit_reason:
                 pnl = (exit_price / pos["entry"] - 1) * 100
-                trades.append({"pnl": pnl, "days": hold_days, "reason": exit_reason, "entry_idx": pos["idx"]})
+                # 1차 익절 했으면 나머지 절반만 기록
+                remaining_ratio = (1 - PARTIAL_SELL_RATIO) if pos["partial"] else 1.0
+                trades.append({"pnl": pnl * remaining_ratio, "days": hold_days, "reason": exit_reason, "entry_idx": pos["idx"]})
                 pos = None
 
     if pos:
@@ -1462,7 +1473,7 @@ def main():
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
-    print(f"   목표수익: +{PROFIT_TARGET_PCT}% | 손절: -{LOSS_CUT_PCT}% | RSI 매수상한: {RSI_BUY_CEILING}")
+    print(f"   분할익절: +{PROFIT_TARGET_1ST}%(절반) → +{PROFIT_TARGET_2ND}%(전량) | 손절: -{LOSS_CUT_PCT}% | RSI상한: {RSI_BUY_CEILING}")
     print(f"   재매수 드롭: {REBUY_DROP_PCT}% | 최대 포지션: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
@@ -1605,11 +1616,33 @@ def main():
                 except (ValueError, TypeError):
                     pass
 
-            # v4.0: 목표 수익률 도달 → 매도
-            if pnl_pct >= PROFIT_TARGET_PCT:
+            # v4.0: 분할 익절 — 1차 +4%에서 절반 매도
+            if pnl_pct >= PROFIT_TARGET_1ST and not pos.get("partial_taken"):
+                vol = pos.get("volume", 0)
+                sell_vol = vol * PARTIAL_SELL_RATIO
+                if can_trade and sell_vol > 0:
+                    order = execute_sell(ticker, sell_vol)
+                    if order:
+                        record_order(order_log, ticker, "SELL")
+                        pos["partial_taken"] = True
+                        pos["volume"] = vol - sell_vol
+                        signal_fired = True
+                        sold_value = sell_vol * r["price"]
+                        total_exposure = max(0, total_exposure - sold_value / total_capital)
+                        capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
+                        send_telegram(
+                            f"💰 <b>{name}</b> 1차 익절 ({PARTIAL_SELL_RATIO*100:.0f}%)\n"
+                            f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
+                            f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
+                        print(f"   💰 {name} 1차 익절: {pnl_pct:+.1f}% (절반 매도)")
+                elif not can_trade:
+                    print(f"   💰 {name} 1차 익절 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
+
+            # v4.0: 2차 익절 — +8%에서 나머지 전량 매도
+            if pnl_pct >= PROFIT_TARGET_2ND:
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "PROFIT_TARGET"
-                print(f"   🎯 {name} 목표 수익: {pnl_pct:+.1f}% ≥ {PROFIT_TARGET_PCT}%")
+                print(f"   🎯 {name} 2차 익절: {pnl_pct:+.1f}% ≥ {PROFIT_TARGET_2ND}%")
 
             # v4.0: 고정 손절 → 최소 보유시간 이후에만
             elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
@@ -1709,14 +1742,14 @@ def main():
 
             if ticker in portfolio:
                 pos = portfolio[ticker]
-                pyramid_ok = (
-                    PYRAMID_ENABLED
-                    and r["atr"] > 0
-                    and pos.get("pyramid_count", 0) < PYRAMID_MAX_ADDS
-                    and r["price"] >= pos["entry_price"] + r["atr"] * PYRAMID_ATR_THRESHOLD
+                # v4.0: 분할매수 (DCA) — 진입가 대비 더 떨어지면 추가 매수 (물타기)
+                dca_ok = (
+                    DCA_ENABLED
+                    and pos.get("dca_count", 0) < DCA_MAX_ADDS
+                    and r["price"] <= pos["entry_price"] * (1 - DCA_DROP_PCT / 100)
                 )
-                if pyramid_ok:
-                    add_krw = r["position"]["position_krw"] * 0.5  # 초기의 50%
+                if dca_ok:
+                    add_krw = r["position"]["position_krw"] * DCA_ADD_RATIO
                     if can_trade and add_krw >= 5000:
                         order = execute_buy(ticker, add_krw)
                         if order:
@@ -1724,19 +1757,18 @@ def main():
                             old_vol = pos.get("volume", 0)
                             add_vol = add_krw / r["price"]
                             new_vol = old_vol + add_vol
-                            # 가중평균 진입가 업데이트
                             pos["entry_price"] = (pos["entry_price"] * old_vol + r["price"] * add_vol) / new_vol
                             pos["volume"] = new_vol
-                            pos["pyramid_count"] = pos.get("pyramid_count", 0) + 1
-                            pos["high_watermark"] = max(pos.get("high_watermark", 0), r["price"])
+                            pos["dca_count"] = pos.get("dca_count", 0) + 1
                             signal_fired = True
+                            drop_pct = (r["price"] / pos["entry_price"] - 1) * 100
                             send_telegram(
-                                f"📈 <b>{name}</b> 피라미드 매수 ({pos['pyramid_count']}회)\n"
-                                f"추가 {_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])}\n"
+                                f"📉 <b>{name}</b> 분할매수 ({pos['dca_count']}차)\n"
+                                f"추가 {_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])} ({drop_pct:+.1f}%)\n"
                                 f"평균단가: {_fmt_krw(pos['entry_price'])}")
-                            print(f"   📈 {name} 피라미드 매수: +{_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])}")
-                    else:
-                        print(f"   📈 {name} 피라미드 조건 충족 ({'자동매매 비활성' if not can_trade else '금액 부족'})")
+                            print(f"   📉 {name} 분할매수: +{_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])} (평단 {_fmt_krw(pos['entry_price'])})")
+                    elif not can_trade:
+                        print(f"   📉 {name} 분할매수 조건 충족 (자동매매 비활성)")
                 else:
                     print(f"   ℹ️ {name} 이미 보유 중 — 추가 매수 생략")
             else:
@@ -1784,7 +1816,7 @@ def main():
                                     "volume": est_vol,
                                     "entry_price": r["price"],
                                     "entry_date": utc_now().isoformat(),
-                                    "high_watermark": r["price"],
+                                    "dca_count": 0,
                                 }
                                 portfolio_tickers.add(ticker)
                                 send_telegram(
