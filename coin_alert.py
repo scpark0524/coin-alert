@@ -73,7 +73,7 @@ RISK_BUDGET             = 0.02
 MAX_POSITION_PCT        = 0.15   # v4.0: 종목당 15% (다종목 테스트)
 MIN_POSITION_PCT        = 0.01
 MAX_PORTFOLIO_EXPOSURE  = 0.80
-MAX_CONCURRENT_POSITIONS = 6     # v4.0: 동시 보유 최대 6종목
+MAX_CONCURRENT_POSITIONS = 10    # v4.0: 동시 보유 최대 10종목 (80% 노출 한도로 총 리스크 유지)
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
