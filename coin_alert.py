@@ -1631,6 +1631,24 @@ def main():
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
+        # v3.3: 신호 매도도 최소 보유시간 적용 (레짐 전환 노이즈 방지)
+        # STRONG_CLOSE(-50 이하)는 긴급 청산이므로 예외
+        if r["signal"] == "CLOSE" and ticker in portfolio:
+            if r.get("close_reason") not in ("TRAILING_STOP", "TIME_STOP"):
+                entry_date_str = portfolio[ticker].get("entry_date")
+                if entry_date_str and entry_date_str != "synced":
+                    try:
+                        entry_dt = datetime.fromisoformat(entry_date_str)
+                        if entry_dt.tzinfo is None:
+                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                        hold_hours = (utc_now() - entry_dt).total_seconds() / 3600
+                        if hold_hours < MIN_HOLD_HOURS:
+                            r["signal"] = "HOLD"
+                            name = ticker.replace("KRW-", "")
+                            print(f"   ⏳ {name} 신호 매도 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
+                    except (ValueError, TypeError):
+                        pass
+
     # Step 2: 신호 강도 기준 정렬 (v2.3)
     # 청산 우선 → 매수는 앙상블 점수 내림차순 → HOLD
     # 높은 점수 종목이 노출 한도를 우선 확보
