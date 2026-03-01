@@ -68,12 +68,12 @@ PRICE_CHANGE_THRESHOLD = 5.0
 SR_LOOKBACK         = 60
 SR_PROXIMITY        = 0.015
 
-# 포지션 사이징 (v4.0: 집중 투자)
+# 포지션 사이징 (v4.0: 분산 테스트)
 RISK_BUDGET             = 0.02
-MAX_POSITION_PCT        = 0.35   # v4.0: 15%→35% 종목당 집중 투자
+MAX_POSITION_PCT        = 0.15   # v4.0: 종목당 15% (다종목 테스트)
 MIN_POSITION_PCT        = 0.01
 MAX_PORTFOLIO_EXPOSURE  = 0.80
-MAX_CONCURRENT_POSITIONS = 3     # v4.0 NEW: 동시 보유 최대 3종목
+MAX_CONCURRENT_POSITIONS = 6     # v4.0: 동시 보유 최대 6종목
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -1159,8 +1159,8 @@ def calc_position_size(atr_val, price, conf, bt, capital=INITIAL_CAPITAL):
     if bt.get("total_trades", 0) >= 10 and bt.get("sharpe", 0) < -0.5:
         return {"position_pct": 0, "position_krw": 0, "method": "BT_REJECT", "kelly_ref": 0}
 
-    # v4.0: 기본 30% 포지션, 신뢰도에 따라 50~100% 스케일
-    base_pct = 0.30
+    # v4.0: 기본 12% 포지션, 신뢰도에 따라 50~100% 스케일
+    base_pct = 0.12
     conf_mult = max(0.5, min(1.0, conf / 80))  # conf 40→0.5, conf 80→1.0
     position_pct = base_pct * conf_mult
     position_pct = max(MIN_POSITION_PCT, min(MAX_POSITION_PCT, position_pct))
