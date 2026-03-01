@@ -1,16 +1,17 @@
 """
-🪙 Coin Alert System v3.3 — Upbit KRW 자동매매
+🪙 Coin Alert System v4.0 — Upbit KRW 자동매매
 
-v3.3: 최소 보유 3시간 (진입 직후 노이즈 스탑 방지)
-v3.2: 수익 구조 전환 (10일 백테스트 기반 최적화)
-- 빠른 손절: ATR×2.5→2.0 (신속 손절 + 쿨다운 보호)
-- 손절 후 쿨다운: 스탑 발동 후 같은 종목 24시간 재진입 금지 (휩소 방지)
-- v3.1 필터 제거: RSI/BEAR/F&G 차단은 오히려 수익 감소 (시뮬레이션 검증)
-- 10일 백테스트 결과: BTC -3.7% 하락장에서 +5.7% 수익, 59% 승률
+v4.0: 평균회귀/스윙 트레이딩 전면 재설계
+- 핵심 전환: 모멘텀 추종 → 평균회귀 (저점 매수 / 고점 매도)
+- breakout 전략 제거, mean_reversion 55-65% 비중
+- RSI > 60 하드 매수 차단 필터 (비타협)
+- 고정 목표 수익률 +6% / 고정 손절 -4% (R:R 1:1.5)
+- 매도가 기억: 5% 하락 후에만 재매수 (추격매매 방지)
+- 포지션 집중: 최대 3종목 동시 보유, 종목당 35%
+- 트레일링 스탑/부분 익절/피라미드 제거 → 단순 명확한 로직
 
-v3.0: 모멘텀 예측 전략, 노출 80%, 서킷브레이커 완화, VWAP 완화, 시간 스탑
-v2.3: 매수 우선순위 정렬, 노출 계산 버그 수정, 종목 20개 확대, 피크시간대 15분
-v2.0: VWAP, 부분 익절, 피라미드, 서킷브레이커, 공포탐욕, 파라미터 최적화
+v3.x: 모멘텀 추종 기반 (breakout 45%) — 고점 매수 문제로 폐기
+v2.x: VWAP, 부분 익절, 피라미드, 서킷브레이커
 v1.0: stock-alert v7.6 기반 코인 자동매매
 """
 
@@ -48,29 +49,31 @@ SIGNAL_CANDLES  = 300          # 1시간봉 300개 (~12일)
 BT_INTERVAL     = "day"        # 백테스트용: 일봉
 BT_CANDLES      = 200          # 일봉 200일
 
-# 기술적 지표 (v2.0: 코인 특화)
+# 기술적 지표 (v4.0: 평균회귀 특화)
 SHORT_WINDOW        = 20
 LONG_WINDOW         = 50
-RSI_PERIOD          = 9        # v2.0: 14→9 빠른 반응
-RSI_OVERBOUGHT      = 80       # v2.0: 75→80 코인 추세 더 강함
-RSI_OVERSOLD        = 20       # v2.0: 25→20 진짜 과매도 포착
-MACD_FAST           = 8        # v2.0: 12→8 빠른 크로스오버
-MACD_SLOW           = 21       # v2.0: 26→21
-MACD_SIGNAL         = 5        # v2.0: 9→5
-BB_PERIOD           = 15       # v2.0: 20→15 민감한 밴드
-BB_STD              = 2.0      # v2.0: 2.5→2.0 더 많은 신호
+RSI_PERIOD          = 9
+RSI_OVERBOUGHT      = 70       # v4.0: 80→70 더 일찍 매도 신호
+RSI_OVERSOLD        = 25       # v4.0: 20→25 더 넓은 매수 구간
+RSI_BUY_CEILING     = 60       # v4.0 NEW: RSI > 60이면 절대 매수 금지
+MACD_FAST           = 8
+MACD_SLOW           = 21
+MACD_SIGNAL         = 5
+BB_PERIOD           = 15
+BB_STD              = 2.0
 ADX_PERIOD          = 14
-ADX_STRONG_TREND    = 20       # v2.0: 25→20 초기 추세 포착
+ADX_STRONG_TREND    = 20
 VOLUME_SPIKE_RATIO  = 2.0
-PRICE_CHANGE_THRESHOLD = 5.0  # 코인: 5% 이상 급등락
+PRICE_CHANGE_THRESHOLD = 5.0
 SR_LOOKBACK         = 60
 SR_PROXIMITY        = 0.015
 
-# 포지션 사이징
-RISK_BUDGET             = 0.02   # 거래당 자본 리스크 2%
-MAX_POSITION_PCT        = 0.15   # 종목당 최대 15%
-MIN_POSITION_PCT        = 0.01   # v2.1: 0.05→0.01 (RISK_BUDGET 2% 의도 보호)
-MAX_PORTFOLIO_EXPOSURE  = 0.80   # v3.0: 60%→80% 적극적 매매
+# 포지션 사이징 (v4.0: 집중 투자)
+RISK_BUDGET             = 0.02
+MAX_POSITION_PCT        = 0.35   # v4.0: 15%→35% 종목당 집중 투자
+MIN_POSITION_PCT        = 0.01
+MAX_PORTFOLIO_EXPOSURE  = 0.80
+MAX_CONCURRENT_POSITIONS = 3     # v4.0 NEW: 동시 보유 최대 3종목
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -83,21 +86,22 @@ COMMISSION_BPS      = 5
 SLIPPAGE_BPS        = 5
 TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 
-# ATR 기반 리스크 (코인: 더 넓은 스탑/타겟)
+# v4.0: 고정 수익률 기반 리스크 관리
 ATR_PERIOD      = 14
-ATR_STOP_MULT   = 2.0   # v3.2: 2.5→2.0 빠른 손절 (쿨다운 보호)
-ATR_TARGET_MULT = 4.0   # 더 넓은 수익 타겟
-ATR_PARTIAL_TARGET_MULT = 2.0  # v3.2: 1.5→2.0 복원 (기본값 최적)
-PARTIAL_SELL_RATIO      = 0.5  # v2.0: 50% 부분 익절
-STOP_COOLDOWN_HOURS     = 24   # v3.2: 스탑 후 재진입 쿨다운 (핵심)
-MIN_HOLD_HOURS          = 3    # v3.3: 최소 보유시간 (진입 직후 스탑 방지)
-MAX_HOLD_DAYS   = 7     # v2.0: 14→7 코인 모멘텀 2-7일
-SIGNAL_THRESHOLD = 15   # v2.0: 20→15 더 활발한 신호
+ATR_STOP_MULT   = 2.0           # 백테스트 호환용
+ATR_TARGET_MULT = 4.0           # 백테스트 호환용
+PROFIT_TARGET_PCT    = 6.0      # v4.0 NEW: +6% 도달 시 매도
+LOSS_CUT_PCT         = 4.0      # v4.0 NEW: -4% 도달 시 손절 (R:R 1:1.5)
+REBUY_DROP_PCT       = 5.0      # v4.0 NEW: 매도가 대비 5% 하락 후에만 재매수
+STOP_COOLDOWN_HOURS  = 24       # 손절 후 재진입 쿨다운
+MIN_HOLD_HOURS       = 3        # 최소 보유시간
+MAX_HOLD_DAYS        = 10       # v4.0: 7→10 평균회귀 여유 확보
+SIGNAL_THRESHOLD     = 20       # v4.0: 15→20 더 엄격한 신호
 
-# 피라미드 매수 (v2.0)
-PYRAMID_ENABLED        = True
-PYRAMID_MAX_ADDS       = 1     # 최대 1회 추가 매수
-PYRAMID_ATR_THRESHOLD  = 1.0   # 진입가 + ATR×1.0 이상일 때
+# 피라미드 매수 (v4.0: 비활성화)
+PYRAMID_ENABLED        = False   # v4.0: 비활성화
+PYRAMID_MAX_ADDS       = 1
+PYRAMID_ATR_THRESHOLD  = 1.0
 
 # 서킷브레이커
 CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
@@ -312,11 +316,13 @@ def sync_portfolio_with_upbit(portfolio):
                         actual[t][key] = local[t][key]
             if "high_watermark" not in actual[t]:
                 actual[t]["high_watermark"] = actual[t]["entry_price"]
-        # _meta 보존
+        # _meta, _sell_memory 보존
         if "_meta" in local:
             actual["_meta"] = local["_meta"]
+        if "_sell_memory" in local:
+            actual["_sell_memory"] = local["_sell_memory"]
 
-        local_set = {k for k in local if k != "_meta"}
+        local_set = {k for k in local if k not in ("_meta", "_sell_memory")}
         actual_set = set(actual.keys()) - {"_meta"}
         if actual_set != local_set:
             diff = f"로컬{sorted(local_set)} → 실계좌{sorted(actual_set)}"
@@ -360,12 +366,12 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     priced_tickers = set()
     for r in results:
         ticker = r["ticker"]
-        if r["signal"] != "NO_DATA" and ticker in portfolio and ticker != "_meta":
+        if r["signal"] != "NO_DATA" and ticker in portfolio and ticker not in ("_meta", "_sell_memory"):
             pos = portfolio[ticker]
             current_value += r["price"] * pos.get("volume", 0)
             priced_tickers.add(ticker)
     for ticker in portfolio:
-        if ticker != "_meta" and ticker not in priced_tickers:
+        if ticker not in ("_meta", "_sell_memory") and ticker not in priced_tickers:
             pos = portfolio[ticker]
             current_value += pos.get("entry_price", 0) * pos.get("volume", 0)
     peak_value = meta.get("peak_value", current_value)
@@ -385,7 +391,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "3.3"
+        meta["version"] = "4.0"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -820,72 +826,78 @@ def get_regime_emoji(r):
 
 
 def get_regime_threshold(r):
-    """레짐별 신호 임계값 (v2.0: 25% 인하 — 코인 매매 빈도 증가)"""
+    """v4.0: 높은 임계값 — 더 적지만 확실한 신호"""
     return {
-        "BULL":      18,
-        "MILD_BULL": 15,
-        "SIDEWAYS":  12,
-        "MILD_BEAR": 14,
-        "BEAR":      18,
-        "VOLATILE":  14,
+        "BULL":      22,
+        "MILD_BULL": 20,
+        "SIDEWAYS":  18,
+        "MILD_BEAR": 20,
+        "BEAR":      22,
+        "VOLATILE":  20,
     }.get(r, SIGNAL_THRESHOLD)
 
 
 def get_regime_strategy_weights(r):
-    """v3.0: 4-전략 가중치 (추세 + 평균회귀 + 돌파 + 모멘텀예측)"""
+    """v4.0: 평균회귀 중심 3-전략 가중치 (breakout 제거)"""
     return {
-        "BULL":      {"trend": 0.25, "mean_revert": 0.10, "breakout": 0.45, "momentum_pred": 0.20},
-        "MILD_BULL": {"trend": 0.20, "mean_revert": 0.15, "breakout": 0.45, "momentum_pred": 0.20},
-        "SIDEWAYS":  {"trend": 0.10, "mean_revert": 0.40, "breakout": 0.30, "momentum_pred": 0.20},
-        "MILD_BEAR": {"trend": 0.15, "mean_revert": 0.25, "breakout": 0.40, "momentum_pred": 0.20},
-        "BEAR":      {"trend": 0.10, "mean_revert": 0.30, "breakout": 0.40, "momentum_pred": 0.20},
-        "VOLATILE":  {"trend": 0.10, "mean_revert": 0.20, "breakout": 0.50, "momentum_pred": 0.20},
-    }.get(r, {"trend": 0.15, "mean_revert": 0.20, "breakout": 0.45, "momentum_pred": 0.20})
+        "BULL":      {"trend": 0.15, "mean_revert": 0.55, "momentum_pred": 0.30},
+        "MILD_BULL": {"trend": 0.10, "mean_revert": 0.60, "momentum_pred": 0.30},
+        "SIDEWAYS":  {"trend": 0.05, "mean_revert": 0.65, "momentum_pred": 0.30},
+        "MILD_BEAR": {"trend": 0.10, "mean_revert": 0.60, "momentum_pred": 0.30},
+        "BEAR":      {"trend": 0.15, "mean_revert": 0.55, "momentum_pred": 0.30},
+        "VOLATILE":  {"trend": 0.05, "mean_revert": 0.60, "momentum_pred": 0.35},
+    }.get(r, {"trend": 0.10, "mean_revert": 0.60, "momentum_pred": 0.30})
 
 
 # ============================================
 # 멀티 전략 앙상블
 # ============================================
 def strategy_trend_following(data, today, yesterday):
+    """v4.0: 축소된 추세 추종 — 확인 역할만 (주도 아닌 보조)"""
     score = 0
     if yesterday["SMA_Short"] <= yesterday["SMA_Long"] and today["SMA_Short"] > today["SMA_Long"]:
-        score += 40
+        score += 25    # v4.0: 40→25
     elif yesterday["SMA_Short"] >= yesterday["SMA_Long"] and today["SMA_Short"] < today["SMA_Long"]:
-        score -= 40
+        score -= 25
     elif today["SMA_Short"] > today["SMA_Long"]:
-        score += 15
+        score += 8     # v4.0: 15→8
     else:
-        score -= 15
+        score -= 8
     if yesterday["MACD"] <= yesterday["MACD_Signal"] and today["MACD"] > today["MACD_Signal"]:
-        score += 30
+        score += 20    # v4.0: 30→20
     elif yesterday["MACD"] >= yesterday["MACD_Signal"] and today["MACD"] < today["MACD_Signal"]:
-        score -= 30
+        score -= 20
     elif today["MACD_Hist"] > 0:
-        score += 10
+        score += 5     # v4.0: 10→5
     else:
-        score -= 10
-    # v3.0: ADX 3단계 (이진→단계적 가중치)
+        score -= 5
     adx_val = float(today["ADX"]) if pd.notna(today.get("ADX")) else 0
     di_sign = 1 if today["Plus_DI"] > today["Minus_DI"] else -1
     if adx_val >= 35:
-        score += 30 * di_sign    # 강한 추세
+        score += 20 * di_sign    # v4.0: 30→20
     elif adx_val >= ADX_STRONG_TREND:
-        score += 20 * di_sign    # 보통 추세
+        score += 12 * di_sign    # v4.0: 20→12
     elif adx_val >= 15:
-        score += 10 * di_sign    # 약한 추세
+        score += 5 * di_sign     # v4.0: 10→5
     return max(-100, min(100, score))
 
 
 def strategy_mean_reversion(data, today):
+    """v4.0: 강화된 평균회귀 — 주도 전략 (55-65% 비중)"""
     score = 0
     rsi = float(today["RSI"])
     p = float(today["Close"])
-    if rsi <= RSI_OVERSOLD:      score += 50
-    elif rsi <= 30:              score += 35
-    elif rsi <= 40:              score += 15
-    elif rsi >= RSI_OVERBOUGHT:  score -= 50
-    elif rsi >= 70:              score -= 35
-    elif rsi >= 60:              score -= 15
+    # v4.0: RSI 점수 강화 — 더 넓은 범위, 더 강한 점수
+    if rsi <= 20:        score += 60     # 극도 과매도
+    elif rsi <= 25:      score += 50     # 과매도
+    elif rsi <= 30:      score += 40     # 준과매도
+    elif rsi <= 40:      score += 20     # 저RSI 구간
+    elif rsi <= 50:      score += 5      # 중립-저
+    elif rsi >= 80:      score -= 60     # 극도 과매수
+    elif rsi >= 70:      score -= 50     # 과매수
+    elif rsi >= 65:      score -= 35     # 매도 고려
+    elif rsi >= 60:      score -= 20     # 고RSI 진입
+    # 볼린저 밴드 (유지)
     bu = float(today["BB_Upper"])
     bl = float(today["BB_Lower"])
     bm = float(today["BB_Mid"])
@@ -893,6 +905,7 @@ def strategy_mean_reversion(data, today):
     elif p <= bm - (bm - bl) * 0.5:     score += 20
     elif p >= bu:                        score -= 40
     elif p >= bm + (bu - bm) * 0.5:     score -= 20
+    # 지지/저항
     sr = calc_support_resistance(data)
     if sr["near_support"]:    score += 10
     if sr["near_resistance"]: score -= 10
@@ -930,10 +943,10 @@ def strategy_breakout(data, today):
 
 
 def ensemble_signal(t, m, b, w, mp=0):
-    """v3.0: 4-전략 앙상블 (모멘텀 예측 추가)"""
-    score = t * w["trend"] + m * w["mean_revert"] + b * w["breakout"]
+    """v4.0: 3-전략 앙상블 (breakout 제거, 평균회귀 중심)"""
+    score = t * w.get("trend", 0.10) + m * w.get("mean_revert", 0.60)
     if "momentum_pred" in w:
-        score += mp * w["momentum_pred"]
+        score += mp * w.get("momentum_pred", 0.30)
     return score
 
 
@@ -974,42 +987,44 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
                 except Exception:
                     pass
 
+        # v4.0: breakout 비활성화, 3-전략 앙상블
         total = ensemble_signal(
             strategy_trend_following(sd, t_bar, y_bar),
             strategy_mean_reversion(sd, t_bar),
-            strategy_breakout(sd, t_bar),
+            0,  # v4.0: breakout 제거
             current_rw,
-            strategy_momentum_prediction(sd, t_bar),  # v3.0
+            strategy_momentum_prediction(sd, t_bar),
         )
 
         atr_val = float(t_bar["ATR"]) if pd.notna(t_bar["ATR"]) else 0
+        rsi_val = float(t_bar["RSI"]) if pd.notna(t_bar.get("RSI")) else 50
+
+        # v4.0: RSI 매수 차단 필터 (백테스트에도 동일 적용)
+        if total > 0 and rsi_val > RSI_BUY_CEILING:
+            total = min(total, -5)
 
         if pos is None:
             if total >= current_threshold:
                 entry_price = next_open * (1 + cost_pct)
-                stop_loss   = entry_price - atr_val * ATR_STOP_MULT if atr_val > 0 else entry_price * 0.92
-                take_profit = entry_price + atr_val * ATR_TARGET_MULT if atr_val > 0 else entry_price * 1.15
-                pos = {"entry": entry_price, "idx": i + 1, "stop": stop_loss, "target": take_profit, "high": entry_price}
+                pos = {"entry": entry_price, "idx": i + 1}
         else:
             hold_days = i - pos["idx"]
-            bar_high = float(t_bar["High"])
-            bar_low  = float(t_bar["Low"])
-            if bar_high > pos["high"]:
-                pos["high"] = bar_high
-                pos["stop"] = max(pos["stop"], pos["high"] - atr_val * ATR_STOP_MULT) if atr_val > 0 else pos["stop"]
+            cp = float(t_bar["Close"])
+            pnl_pct = (cp / pos["entry"] - 1) * 100
 
+            # v4.0: 고정 수익률/손절 기반 청산 (트레일링 스탑 제거)
             exit_reason = None
             exit_price  = None
-            if bar_low <= pos["stop"]:
+            if pnl_pct >= PROFIT_TARGET_PCT:
+                exit_reason = "PROFIT_TARGET"
+                exit_price  = cp * (1 - cost_pct)
+            elif pnl_pct <= -LOSS_CUT_PCT:
                 exit_reason = "STOP_LOSS"
-                exit_price  = pos["stop"] * (1 - cost_pct)
-            elif bar_high >= pos["target"]:
-                exit_reason = "TAKE_PROFIT"
-                exit_price  = pos["target"] * (1 - cost_pct)
+                exit_price  = cp * (1 - cost_pct)
             elif hold_days >= MAX_HOLD_DAYS:
                 exit_reason = "TIME_STOP"
                 exit_price  = next_open * (1 - cost_pct)
-            elif total <= -10:
+            elif total <= -current_threshold:
                 exit_reason = "SIGNAL_EXIT"
                 exit_price  = next_open * (1 - cost_pct)
 
@@ -1125,18 +1140,19 @@ def walk_forward_backtest(data, rw, btc_data=None):
 # 포지션 사이징 (inverse-ATR 기반)
 # ============================================
 def calc_position_size(atr_val, price, conf, bt, capital=INITIAL_CAPITAL):
+    """v4.0: 집중 포지션 사이징 (종목당 ~30%, 신뢰도 스케일)"""
     if price <= 0 or atr_val <= 0:
         return {"position_pct": 0, "position_krw": 0, "method": "SKIP", "kelly_ref": 0}
-    if conf < 20:  # v3.0: 30→20 임계값 근처 신호 실행
+    if conf < 25:  # v4.0: 최소 신뢰도 25
         return {"position_pct": 0, "position_krw": 0, "method": "SKIP", "kelly_ref": 0}
-    if bt.get("total_trades", 0) >= 10 and bt.get("sharpe", 0) < -0.5:  # v3.0: 소표본 오판 방지
+    if bt.get("total_trades", 0) >= 10 and bt.get("sharpe", 0) < -0.5:
         return {"position_pct": 0, "position_krw": 0, "method": "BT_REJECT", "kelly_ref": 0}
 
-    atr_pct  = atr_val / price
-    raw_pct  = RISK_BUDGET / (atr_pct * ATR_STOP_MULT)
-    conf_mult = max(0.3, min(1.0, 0.3 + (conf - 20) * 0.7 / 80))  # v3.0: 선형 스케일 (20→0.3, 100→1.0)
-    raw_pct  *= conf_mult
-    position_pct = max(MIN_POSITION_PCT, min(MAX_POSITION_PCT, raw_pct))
+    # v4.0: 기본 30% 포지션, 신뢰도에 따라 50~100% 스케일
+    base_pct = 0.30
+    conf_mult = max(0.5, min(1.0, conf / 80))  # conf 40→0.5, conf 80→1.0
+    position_pct = base_pct * conf_mult
+    position_pct = max(MIN_POSITION_PCT, min(MAX_POSITION_PCT, position_pct))
 
     kelly_ref = 0
     if bt.get("use_kelly"):
@@ -1146,9 +1162,9 @@ def calc_position_size(atr_val, price, conf, bt, capital=INITIAL_CAPITAL):
     return {
         "position_pct": position_pct * 100,
         "position_krw": capital * position_pct,
-        "method": "INV_ATR",
+        "method": "CONCENTRATED",
         "kelly_ref": round(kelly_ref * 100, 1),
-        "atr_pct": round(atr_pct * 100, 2),
+        "atr_pct": round(atr_val / price * 100, 2),
     }
 
 
@@ -1186,17 +1202,26 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
 
     ts  = strategy_trend_following(data, t, y)
     ms  = strategy_mean_reversion(data, t)
-    bks = strategy_breakout(data, t)
-    mps = strategy_momentum_prediction(data, t)  # v3.0: 모멘텀 예측
+    bks = 0  # v4.0: breakout 전략 비활성화 (고점 매수 원인)
+    mps = strategy_momentum_prediction(data, t)
     es  = ensemble_signal(ts, ms, bks, regime_weights, mps)
 
-    # v2.0: VWAP 필터
+    # v4.0: 거래량 급증 보너스 (breakout에서 추출한 유용한 부분)
+    vr_bonus = float(t["Volume"]) / float(data["Volume"].rolling(20).mean().iloc[-1]) if float(data["Volume"].rolling(20).mean().iloc[-1]) > 0 else 1
+    if vr_bonus >= 2.0:
+        es *= 1.15  # 거래량 급증 시 신호 15% 부스트
+
+    # v4.0: VWAP 필터 (유지, 약간 완화)
     vwap = calc_vwap(data)
     if vwap is not None:
-        if es > 0 and cp < vwap:      # 매수 신호인데 가격 < VWAP → v3.0: 30% 감소 (기존 50%)
-            es *= 0.7
-        elif es < 0 and cp > vwap:    # 매도 신호인데 가격 > VWAP → v3.0: 30% 감소
-            es *= 0.7
+        if es > 0 and cp < vwap:
+            es *= 0.8   # v4.0: 0.7→0.8 완화
+        elif es < 0 and cp > vwap:
+            es *= 0.8
+
+    # v4.0: 하드 RSI 매수 차단 필터 (비타협)
+    if es > 0 and rsi > RSI_BUY_CEILING:
+        es = min(es, -5)  # 매수 불가 영역으로 강제 이동
 
     threshold = get_regime_threshold(regime_info["regime"])
 
@@ -1327,7 +1352,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v3.3</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v4.0</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1433,11 +1458,12 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v3.3 — Upbit KRW 자동매매")
+    print(f"{'='*60}\n🪙 Coin Alert v4.0 — Upbit KRW 자동매매 (평균회귀)")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
-    print(f"   리스크 예산: {RISK_BUDGET*100:.0f}%/거래 | 서킷브레이커: MDD {CIRCUIT_BREAKER_DD*100:.0f}% / 일일 {DAILY_DD_LIMIT*100:.0f}%")
+    print(f"   목표수익: +{PROFIT_TARGET_PCT}% | 손절: -{LOSS_CUT_PCT}% | RSI 매수상한: {RSI_BUY_CEILING}")
+    print(f"   재매수 드롭: {REBUY_DROP_PCT}% | 최대 포지션: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
     print(f"{'='*60}\n")
@@ -1472,10 +1498,20 @@ def main():
     capital   = fetch_actual_capital()  # 가용 현금 (KRW)
     order_log = load_order_log()
 
+    # v4.0: _sell_memory 만료 정리 (14일 초과 항목 제거)
+    sell_memory = portfolio.get("_sell_memory", {})
+    expired = [t for t, v in sell_memory.items()
+               if (utc_now() - datetime.fromisoformat(v.get("date", utc_now().isoformat()))).days > 14]
+    for t in expired:
+        del sell_memory[t]
+        print(f"   🗑️ {t.replace('KRW-', '')} 매도가 기억 만료 (14일 초과)")
+    if expired:
+        portfolio["_sell_memory"] = sell_memory
+
     # v2.3: 총 자산 = 가용 현금 + 보유 코인 가치 (노출/포지션 사이징 기준)
     portfolio_value = 0
     for _t, _pos in portfolio.items():
-        if _t == "_meta":
+        if _t in ("_meta", "_sell_memory"):
             continue
         _vol = _pos.get("volume", 0)
         if _t in signal_data and len(signal_data[_t]) > 0:
@@ -1532,7 +1568,7 @@ def main():
 
     # Phase 3: 매매 실행
     print("\n💹 매매 판단...")
-    portfolio_tickers  = {k for k in portfolio if k != "_meta"}
+    portfolio_tickers  = {k for k in portfolio if k not in ("_meta", "_sell_memory")}
     total_exposure     = sum(
         portfolio[t].get("volume", 0) * r["price"] / total_capital
         for r in results if r["signal"] != "NO_DATA"
@@ -1548,93 +1584,54 @@ def main():
 
         ticker = r["ticker"]
 
-        # 트레일링 스탑 & 부분 익절 체크
-        if ticker in portfolio and ticker != "_meta":
+        # v4.0: 고정 수익률 기반 매도 체크 (트레일링 스탑/부분 익절 제거)
+        if ticker in portfolio and ticker != "_meta" and ticker != "_sell_memory":
             pos = portfolio[ticker]
             entry_p = pos["entry_price"]
-            current_hw = pos.get("high_watermark", entry_p)
-            if r["price"] > current_hw:
-                pos["high_watermark"] = r["price"]
-                current_hw = r["price"]
+            pnl_pct = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
+            name = ticker.replace("KRW-", "")
 
-            # v2.0: 부분 익절 — ATR×2.0 도달 시 50% 매도
-            if r["atr"] > 0 and not pos.get("partial_taken"):
-                partial_target = entry_p + r["atr"] * ATR_PARTIAL_TARGET_MULT
-                pnl_check = (r["price"] / entry_p - 1) * 100
-                if r["price"] >= partial_target:
-                    name = ticker.replace("KRW-", "")
-                    vol = pos.get("volume", 0)
-                    sell_vol = vol * PARTIAL_SELL_RATIO
-                    if can_trade and sell_vol > 0:
-                        order = execute_sell(ticker, sell_vol)
-                        if order:
-                            record_order(order_log, ticker, "SELL")
-                            pnl = (r["price"] / entry_p - 1) * 100
-                            pos["partial_taken"] = True
-                            pos["volume"] = vol - sell_vol
-                            signal_fired = True
-                            # v3.3: 부분 매도 후 노출/자본 즉시 갱신 (같은 사이클 재매수 허용)
-                            sold_value = sell_vol * r["price"]
-                            total_exposure = max(0, total_exposure - sold_value / total_capital)
-                            capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
-                            send_telegram(
-                                f"💰 <b>{name}</b> 부분 익절 (50%)\n"
-                                f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl:+.1f}%)\n"
-                                f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
-                            print(f"   💰 {name} 부분 익절: {_fmt_krw(entry_p)}→{_fmt_krw(r['price'])} ({pnl:+.1f}%)")
-                    elif not can_trade:
-                        print(f"   💰 {name} 부분 익절 타겟 도달 (자동매매 비활성)")
+            # 보유시간 계산 (공통)
+            hold_hours = MIN_HOLD_HOURS  # 기본값
+            hold_days = 0
+            entry_date_str = pos.get("entry_date")
+            if entry_date_str and entry_date_str != "synced":
+                try:
+                    entry_dt = datetime.fromisoformat(entry_date_str)
+                    if entry_dt.tzinfo is None:
+                        entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                    hold_hours = (utc_now() - entry_dt).total_seconds() / 3600
+                    hold_days = hold_hours / 24
+                except (ValueError, TypeError):
+                    pass
 
-            if r["atr"] > 0:
-                new_stop   = current_hw - r["atr"] * ATR_STOP_MULT
-                prev_stop  = pos.get("trailing_stop", 0)
-                t_stop     = max(new_stop, prev_stop)
-                pos["trailing_stop"] = t_stop
-                # v3.3: 최소 보유시간 이후에만 트레일링 스탑 적용
-                hold_hours = MIN_HOLD_HOURS  # 기본값: 스탑 허용 (synced/누락 시)
-                entry_date_str = pos.get("entry_date")
-                if entry_date_str and entry_date_str != "synced":
-                    try:
-                        entry_dt = datetime.fromisoformat(entry_date_str)
-                        if entry_dt.tzinfo is None:
-                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-                        hold_hours = (utc_now() - entry_dt).total_seconds() / 3600
-                    except (ValueError, TypeError):
-                        pass  # 기본값 MIN_HOLD_HOURS 유지
-                if r["price"] <= t_stop and hold_hours >= MIN_HOLD_HOURS:
-                    r["signal"] = "CLOSE"
-                    r["close_reason"] = "TRAILING_STOP"
-                    name = ticker.replace("KRW-", "")
-                    print(f"   🛡️ {name} 트레일링 스탑: 고점{_fmt_krw(current_hw)} → 스탑{_fmt_krw(t_stop)}")
-                elif r["price"] <= t_stop:
-                    name = ticker.replace("KRW-", "")
-                    print(f"   ⏳ {name} 스탑 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
+            # v4.0: 목표 수익률 도달 → 매도
+            if pnl_pct >= PROFIT_TARGET_PCT:
+                r["signal"] = "CLOSE"
+                r["close_reason"] = "PROFIT_TARGET"
+                print(f"   🎯 {name} 목표 수익: {pnl_pct:+.1f}% ≥ {PROFIT_TARGET_PCT}%")
 
-            # v3.0: 시간 스탑 — 보유 기간 MAX_HOLD_DAYS 초과 시 청산
-            if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
-                entry_date_str = pos.get("entry_date")
-                if entry_date_str and entry_date_str != "synced":
-                    try:
-                        entry_dt = datetime.fromisoformat(entry_date_str)
-                        if entry_dt.tzinfo is None:
-                            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-                        hold_days = (utc_now() - entry_dt).total_seconds() / 86400
-                        if hold_days >= MAX_HOLD_DAYS:
-                            r["signal"] = "CLOSE"
-                            r["close_reason"] = "TIME_STOP"
-                            name = ticker.replace("KRW-", "")
-                            print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 보유 (한도 {MAX_HOLD_DAYS}일)")
-                    except (ValueError, TypeError):
-                        pass
+            # v4.0: 고정 손절 → 최소 보유시간 이후에만
+            elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
+                r["signal"] = "CLOSE"
+                r["close_reason"] = "STOP_LOSS"
+                print(f"   🛡️ {name} 손절: {pnl_pct:+.1f}% ≤ -{LOSS_CUT_PCT}%")
+            elif pnl_pct <= -LOSS_CUT_PCT:
+                print(f"   ⏳ {name} 손절 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
+
+            # v4.0: 시간 스탑 — 보유 기간 MAX_HOLD_DAYS 초과
+            elif r["signal"] not in ("CLOSE", "STRONG_CLOSE") and hold_days >= MAX_HOLD_DAYS:
+                r["signal"] = "CLOSE"
+                r["close_reason"] = "TIME_STOP"
+                print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 ≥ {MAX_HOLD_DAYS}일")
 
         # CLOSE 신호: 미보유 시 HOLD
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
-        # v3.3: 신호 매도도 최소 보유시간 적용 (레짐 전환 노이즈 방지)
-        # STRONG_CLOSE(-50 이하)는 긴급 청산이므로 예외
+        # v4.0: 신호 매도도 최소 보유시간 적용 (STRONG_CLOSE/PROFIT_TARGET/STOP_LOSS 제외)
         if r["signal"] == "CLOSE" and ticker in portfolio:
-            if r.get("close_reason") not in ("TRAILING_STOP", "TIME_STOP"):
+            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 if entry_date_str and entry_date_str != "synced":
                     try:
@@ -1677,7 +1674,27 @@ def main():
         if r["signal"] in ["BUY", "STRONG_BUY"]:
             name = ticker.replace("KRW-", "")
 
-            # v3.2: 손절 쿨다운 — 최근 스탑 발동 후 STOP_COOLDOWN_HOURS 이내 재진입 차단
+            # v4.0: 포지션 수 제한 (동시 보유 MAX_CONCURRENT_POSITIONS)
+            current_positions = len([k for k in portfolio if k not in ("_meta", "_sell_memory")])
+            if current_positions >= MAX_CONCURRENT_POSITIONS and ticker not in portfolio:
+                print(f"   🚫 {name} 포지션 한도: {current_positions}/{MAX_CONCURRENT_POSITIONS}종목 보유 중")
+                continue
+
+            # v4.0: 매도가 기억 — 충분히 하락해야 재매수
+            sell_memory = portfolio.get("_sell_memory", {})
+            if ticker in sell_memory and ticker not in portfolio:
+                last_sell_price = sell_memory[ticker]["price"]
+                drop_threshold = last_sell_price * (1 - REBUY_DROP_PCT / 100)
+                if r["price"] > drop_threshold:
+                    drop_pct = (r["price"] / last_sell_price - 1) * 100
+                    print(f"   🔒 {name} 재매수 차단: 매도가{_fmt_krw(last_sell_price)} 대비 {drop_pct:+.1f}% (≥-{REBUY_DROP_PCT}% 필요)")
+                    continue
+                else:
+                    del sell_memory[ticker]
+                    portfolio["_sell_memory"] = sell_memory
+                    print(f"   ✅ {name} 재매수 허용: 매도가 대비 {((r['price']/last_sell_price - 1)*100):+.1f}%")
+
+            # 손절 쿨다운 — 최근 스탑 발동 후 STOP_COOLDOWN_HOURS 이내 재진입 차단
             stop_cd_key = f"{ticker}_STOP_CD"
             stop_cd_time = order_log.get(stop_cd_key)
             if stop_cd_time and ticker not in portfolio:
@@ -1812,7 +1829,14 @@ def main():
                                 order_log[f"{ticker}_STOP_CD"] = utc_now().isoformat()
                                 save_order_log(order_log)
                                 print(f"   ⏳ {name} 쿨다운 {STOP_COOLDOWN_HOURS}h 설정 (손실 {pnl:+.1f}%)")
-                            # v3.3: 매도 후 포트폴리오/노출/자본 즉시 갱신 (같은 사이클 재매수 허용)
+                            # v4.0: 매도가 기억 저장 (재매수 가격 게이트)
+                            sell_memory = portfolio.get("_sell_memory", {})
+                            sell_memory[ticker] = {
+                                "price": r["price"],
+                                "date": utc_now().isoformat(),
+                            }
+                            portfolio["_sell_memory"] = sell_memory
+                            # 매도 후 포트폴리오/노출/자본 즉시 갱신
                             sold_value = vol * r["price"]
                             del portfolio[ticker]
                             portfolio_tickers.discard(ticker)
@@ -1854,7 +1878,7 @@ def main():
 
     # Phase 4: 리포트
     print(f"\n📁 포트폴리오 노출: {total_exposure*100:.1f}%")
-    holdings = [k for k in portfolio if k != "_meta"]
+    holdings = [k for k in portfolio if k not in ("_meta", "_sell_memory")]
     if holdings:
         print(f"   보유: {[t.replace('KRW-', '') for t in holdings]}")
     else:
