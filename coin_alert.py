@@ -1,16 +1,18 @@
 """
-🪙 Coin Alert System v4.0 — Upbit KRW 자동매매
+🪙 Coin Alert System v4.1 — Upbit KRW 자동매매
 
-v4.0: 평균회귀/스윙 트레이딩 전면 재설계
-- 핵심 전환: 모멘텀 추종 → 평균회귀 (저점 매수 / 고점 매도)
-- breakout 전략 제거, mean_reversion 55-65% 비중
-- RSI > 60 하드 매수 차단 필터 (비타협)
-- 고정 목표 수익률 +6% / 고정 손절 -4% (R:R 1:1.5)
-- 매도가 기억: 5% 하락 후에만 재매수 (추격매매 방지)
-- 포지션 집중: 최대 3종목 동시 보유, 종목당 35%
-- 트레일링 스탑/부분 익절/피라미드 제거 → 단순 명확한 로직
+v4.1: 실전 데이터 기반 최적화 (3일 18건 거래 분석)
+- 익절 현실화: TP1 +4→2.5%, TP2 +8→5% (TP1 미도달 해소)
+- 손절 축소: -4→3% (익절/손절 비대칭 완화)
+- RSI 필터 강화: 60→45 (과매도 구간 집중)
+- 트레일링 익절 복원: +1.2% 활성→0.7% 콜백 (수익 보존)
+- 거래대금 필터 신설: 24h≥15억원 (유동성 리스크 차단)
+- BB 시그널 엄격화: 2.0→2.2σ
+- 보유기간 축소: 10→5일 (자본 회전율 개선)
+- DCA 비중 상한 강제 (MAX_POSITION_PCT 초과 방지)
 
-v3.x: 모멘텀 추종 기반 (breakout 45%) — 고점 매수 문제로 폐기
+v4.0: 평균회귀 전면 재설계 (breakout 제거, 고정 TP/SL)
+v3.x: 모멘텀 추종 (고점 매수 문제로 폐기)
 v2.x: VWAP, 부분 익절, 피라미드, 서킷브레이커
 v1.0: stock-alert v7.6 기반 코인 자동매매
 """
@@ -55,12 +57,12 @@ LONG_WINDOW         = 50
 RSI_PERIOD          = 9
 RSI_OVERBOUGHT      = 70       # v4.0: 80→70 더 일찍 매도 신호
 RSI_OVERSOLD        = 25       # v4.0: 20→25 더 넓은 매수 구간
-RSI_BUY_CEILING     = 60       # v4.0 NEW: RSI > 60이면 절대 매수 금지
+RSI_BUY_CEILING     = 45       # v4.1: 60→45 평균회귀 전략에 맞게 과매도 구간 집중
 MACD_FAST           = 8
 MACD_SLOW           = 21
 MACD_SIGNAL         = 5
 BB_PERIOD           = 15
-BB_STD              = 2.0
+BB_STD              = 2.2      # v4.1: 2.0→2.2 신호 품질 향상
 ADX_PERIOD          = 14
 ADX_STRONG_TREND    = 20
 VOLUME_SPIKE_RATIO  = 2.0
@@ -90,14 +92,14 @@ TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 ATR_PERIOD      = 14
 ATR_STOP_MULT   = 2.0           # 백테스트 호환용
 ATR_TARGET_MULT = 4.0           # 백테스트 호환용
-PROFIT_TARGET_1ST    = 4.0      # v4.0: 1차 익절 +4% → 절반 매도
-PROFIT_TARGET_2ND    = 8.0      # v4.0: 2차 익절 +8% → 나머지 전량 매도
-PARTIAL_SELL_RATIO   = 0.5      # v4.0: 1차 익절 시 매도 비율 (50%)
-LOSS_CUT_PCT         = 4.0      # v4.0: -4% 도달 시 손절
+PROFIT_TARGET_1ST    = 2.5      # v4.1: 4→2.5% (실전 TP1 미도달 해소)
+PROFIT_TARGET_2ND    = 5.0      # v4.1: 8→5% (실현 가능한 2차 익절)
+PARTIAL_SELL_RATIO   = 0.5      # 1차 익절 시 매도 비율 (50%)
+LOSS_CUT_PCT         = 3.0      # v4.1: 4→3% (손실 비대칭 축소)
 REBUY_DROP_PCT       = 5.0      # v4.0: 매도가 대비 5% 하락 후에만 재매수
 STOP_COOLDOWN_HOURS  = 24       # 손절 후 재진입 쿨다운
 MIN_HOLD_HOURS       = 3        # 최소 보유시간
-MAX_HOLD_DAYS        = 10       # v4.0: 평균회귀 여유 확보
+MAX_HOLD_DAYS        = 5        # v4.1: 10→5일 (자본 회전율 개선)
 SIGNAL_THRESHOLD     = 20       # v4.0: 더 엄격한 신호
 
 # v4.0: 분할매수 (평균회귀식 — 떨어지면 추가 매수)
@@ -105,6 +107,13 @@ DCA_ENABLED            = True    # v4.0: 분할매수 활성화
 DCA_DROP_PCT           = 3.0     # 진입가 대비 3% 추가 하락 시 2차 매수
 DCA_MAX_ADDS           = 1       # 최대 1회 추가 매수
 DCA_ADD_RATIO          = 0.5     # 초기 금액의 50% 추가 매수
+
+# v4.1: 거래대금 필터 (유동성 리스크 차단)
+MIN_VOLUME_24H         = 1.5e10  # 24시간 거래대금 15억원 이상만 매수
+
+# v4.1: 트레일링 익절 (수익 보존)
+TRAILING_ACTIVATE_PCT  = 1.2     # +1.2% 이상에서 트레일링 활성화
+TRAILING_CALLBACK_PCT  = 0.7     # 고점 대비 -0.7% 하락 시 매도
 
 # 서킷브레이커
 CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
@@ -1211,6 +1220,9 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     vr    = float(t["Volume"]) / float(av) if float(av) > 0 else 0
     sr    = calc_support_resistance(data)
 
+    # v4.1: 24시간 거래대금 산출 (KRW 기준)
+    vol_24h = (data["Volume"].tail(24) * data["Close"].tail(24)).sum()
+
     ts  = strategy_trend_following(data, t, y)
     ms  = strategy_mean_reversion(data, t)
     bks = 0  # v4.0: breakout 전략 비활성화 (고점 매수 원인)
@@ -1308,6 +1320,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
         "trend_score": ts, "mean_rev_score": ms, "breakout_score": bks, "momentum_pred_score": mps,
         "ensemble_score": es, "confidence": conf, "vwap": vwap,
         "backtest": bt, "weekly": wk, "position": ps,
+        "volume_24h": vol_24h,
     }
 
 
@@ -1469,11 +1482,12 @@ def generate_chart(ticker, data, result):
 # ============================================
 def main():
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v4.0 — Upbit KRW 자동매매 (평균회귀)")
+    print(f"{'='*60}\n🪙 Coin Alert v4.1 — Upbit KRW 자동매매 (평균회귀)")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
     print(f"   분할익절: +{PROFIT_TARGET_1ST}%(절반) → +{PROFIT_TARGET_2ND}%(전량) | 손절: -{LOSS_CUT_PCT}% | RSI상한: {RSI_BUY_CEILING}")
+    print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
     print(f"   재매수 드롭: {REBUY_DROP_PCT}% | 최대 포지션: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
@@ -1658,13 +1672,22 @@ def main():
                 r["close_reason"] = "TIME_STOP"
                 print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 ≥ {MAX_HOLD_DAYS}일")
 
+            # v4.1: 트레일링 익절 — 수익 고점 대비 콜백 시 매도
+            if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
+                high_pnl = max(pos.get("high_pnl", 0), pnl_pct)
+                pos["high_pnl"] = high_pnl
+                if high_pnl >= TRAILING_ACTIVATE_PCT and (high_pnl - pnl_pct) >= TRAILING_CALLBACK_PCT:
+                    r["signal"] = "CLOSE"
+                    r["close_reason"] = "TRAILING_STOP"
+                    print(f"   📈 {name} 트레일링 익절: 고점 {high_pnl:+.1f}% → 현재 {pnl_pct:+.1f}% (콜백 {high_pnl-pnl_pct:.1f}%)")
+
         # CLOSE 신호: 미보유 시 HOLD
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
         # v4.0: 신호 매도도 최소 보유시간 적용 (STRONG_CLOSE/PROFIT_TARGET/STOP_LOSS 제외)
         if r["signal"] == "CLOSE" and ticker in portfolio:
-            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP"):
+            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP", "TRAILING_STOP"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 if entry_date_str and entry_date_str != "synced":
                     try:
@@ -1713,6 +1736,12 @@ def main():
                 print(f"   🚫 {name} 포지션 한도: {current_positions}/{MAX_CONCURRENT_POSITIONS}종목 보유 중")
                 continue
 
+            # v4.1: 거래대금 필터 — 유동성 부족 종목 차단
+            vol_24h = r.get("volume_24h", float("inf"))
+            if vol_24h < MIN_VOLUME_24H and ticker not in portfolio:
+                print(f"   🚫 {name} 거래대금 부족: {vol_24h/1e8:.0f}억 < {MIN_VOLUME_24H/1e8:.0f}억")
+                continue
+
             # v4.0: 매도가 기억 — 충분히 하락해야 재매수
             sell_memory = portfolio.get("_sell_memory", {})
             if ticker in sell_memory and ticker not in portfolio:
@@ -1750,6 +1779,13 @@ def main():
                 )
                 if dca_ok:
                     add_krw = r["position"]["position_krw"] * DCA_ADD_RATIO
+                    # v4.1: DCA 시 비중 상한 강제 (MAX_POSITION_PCT 초과 방지)
+                    current_pos_value = pos.get("volume", 0) * r["price"]
+                    max_pos_value = total_capital * MAX_POSITION_PCT
+                    if current_pos_value + add_krw > max_pos_value:
+                        add_krw = max(0, max_pos_value - current_pos_value)
+                        if add_krw < 5000:
+                            print(f"   ⚠️ {name} DCA 차단: 비중 상한 {MAX_POSITION_PCT*100:.0f}% 도달")
                     if can_trade and add_krw >= 5000:
                         order = execute_buy(ticker, add_krw)
                         if order:
