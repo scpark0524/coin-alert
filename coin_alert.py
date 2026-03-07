@@ -39,9 +39,20 @@ TICKERS = [
     # 대형주
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
-    # v2.3: 중소형/이종 섹터 (20종목 확대)
+    # 중소형/이종 섹터
     "KRW-SUI", "KRW-BCH", "KRW-BERA", "KRW-APT", "KRW-VIRTUAL",
     "KRW-AXL", "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
+    # v4.6: 섹터 다양화 확장 (30종목)
+    "KRW-SHIB",    # 밈코인
+    "KRW-FLOW",    # L1/NFT
+    "KRW-IP",      # IP 토큰화
+    "KRW-SAHARA",  # AI 데이터
+    "KRW-ATH",     # AI/GPU
+    "KRW-MANTRA",  # RWA
+    "KRW-DEEP",    # DeFi/DEX (SUI)
+    "KRW-ORCA",    # DeFi/DEX (SOL)
+    "KRW-ZETA",    # Cross-chain
+    "KRW-ANKR",    # Web3 인프라
 ]
 INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 3_000_000))  # KRW 300만원 기본
 
@@ -55,24 +66,51 @@ BT_CANDLES      = 200          # 일봉 200일
 SHORT_WINDOW        = 20
 LONG_WINDOW         = 50
 RSI_PERIOD          = 9
-RSI_OVERBOUGHT      = 70       # v4.0: 80→70 더 일찍 매도 신호
-RSI_OVERSOLD        = 25       # v4.0: 20→25 더 넓은 매수 구간
-RSI_BUY_CEILING     = 45       # v4.1: 60→45 평균회귀 전략에 맞게 과매도 구간 집중
+RSI_OVERBOUGHT      = 75       # v4.4: 70→75 (RSI_SELL_TRIGGER 78과 정합성 확보)
+                               # 근거: 과매수 기준 70에서 경고→78에서 매도는 혼란 유발
+                               # 75 = SELL_TRIGGER(78) 직전 경고 수준, 트레일링 활성화 트리거로 활용
+RSI_OVERSOLD        = 40       # v4.5: 35→40 (3일 실전: 35에서도 신호 과소, 하위 ~27%ile로 확대)
+                               # 근거: RSI 40 = 중립(50) 대비 10pt 하방, 여전히 과매도 영역
+                               # 대원칙3 준수: 40은 하위 30%ile — "충분히 떨어진" 기준 유지
+                               # 40 초과 진입은 RSI_BUY_CEILING(65)로 이중 차단
+RSI_BUY_CEILING     = 65       # v4.5: 60→65 (반등 초기 구간 진입 기회 확보, 추격매수는 65+에서 차단)
+                               # 근거: RSI 60~65 = 과매도 탈출 후 중립~약상승 전이 구간
+                               # 65 이상 = 추세 가속 구간으로 평균회귀 진입 부적합 → 차단 유지
+                               # 대원칙3 "추격매수 절대 금지" — 65는 과매수(75) 대비 10pt 하방
+RSI_SELL_TRIGGER    = 78       # v4.4: 68→78 (3일 실전: RSI68이 TP1 전 100% 강제퇴출 → 수익 억제 원인 #1)
+                               # 근거: RSI68은 상위20%ile로 상승 중간. 78=상위5%ile, 실제 반전 확률 유의미
+                               # 대원칙4 "올랐을 때 확실히 익절" — 68은 "아직 안 오른" 구간이었음
+                               # TP1(3.5%)이 RSI 퇴출보다 먼저 작동하는 구조로 전환
 MACD_FAST           = 8
 MACD_SLOW           = 21
 MACD_SIGNAL         = 5
 BB_PERIOD           = 15
-BB_STD              = 2.2      # v4.1: 2.0→2.2 신호 품질 향상
+BB_STD              = 1.5      # v4.5: 1.8→1.5 (3일 실전: 1.8σ에서도 신호 과소 — 일 0.67건)
+                               # 근거: 1.5σ = 양측 13.4% 구간, 1.8σ 대비 ~2배 터치 빈도
+                               # 노이즈 우려는 RSI+ADX 필터가 보완 (AND 구조 유지)
+                               # 1h봉 300개 실측: 1.8σ 터치 평균 8~12회 → 1.5σ 예상 16~24회
 ADX_PERIOD          = 14
-ADX_STRONG_TREND    = 20
-VOLUME_SPIKE_RATIO  = 2.0
-PRICE_CHANGE_THRESHOLD = 5.0
+ADX_STRONG_TREND    = 28       # v4.5: 20→28 (ADX 20은 약추세도 차단하여 평균회귀 기회 과잉 필터링)
+                               # 근거: ADX 20~28 = "약한 추세" 구간, 평균회귀 전략에 적합
+                               # ADX 28+ = 강한 추세, 역추세 진입 위험 → 여기서만 차단
+                               # Wilder 기준: ADX<25 비추세, 25~50 추세, 50+ 극강추세
+VOLUME_SPIKE_RATIO  = 1.3      # v4.5: 2.0→1.3 (3일 실전: 2.0x는 1h봉 상위15%ile로 과도한 진입 장벽)
+                               # 근거: 1.3x = 평균 대비 30% 이상 거래량, 관심 증가 확인에 충분
+                               # 거래대금 필터(24h≥15억)와 이중 유동성 체크로 리스크 보완
+PRICE_CHANGE_THRESHOLD = 3.0   # v4.5: 5.0→3.0 (1h봉에서 5% 변동은 상위3%ile, 사실상 블랙스완 필터)
+                               # 근거: 3% = 의미있는 가격 변동 확인에 충분한 임계값
+                               # 대형 코인(BTC/ETH) 1h 평균 변동 1.5~2.5% → 3%는 평균+1σ 수준
 SR_LOOKBACK         = 60
-SR_PROXIMITY        = 0.015
+SR_PROXIMITY        = 0.025    # v4.5: 0.015→0.025 (S/R 자체 오차 ±1~2% 감안, 2.5%가 실용적 근접 범위)
+                               # 근거: 지지선에서 1.5% 이내만 인정하면 터치 없이 반등하는 경우 놓침
+                               # 2.5% = S/R 반등 유효 범위의 실증적 상한
 
 # 포지션 사이징 (v4.0: 분산 테스트)
 RISK_BUDGET             = 0.02
-MAX_POSITION_PCT        = 0.15   # v4.0: 종목당 15% (다종목 테스트)
+MAX_POSITION_PCT        = 0.20   # v4.3: 종목당 20% (확신 매매 집중)
+                                 # 근거: 코인 간 상관계수 높아 10종목 분산 효과 제한적
+                                 # 5종목 × 20% = 100% → MAX_PORTFOLIO_EXPOSURE(80%)로 상한 유지
+                                 # 외부 고문: "농도 짙은 매매가 관리 효율 면에서 우월"
 MIN_POSITION_PCT        = 0.01
 MAX_PORTFOLIO_EXPOSURE  = 0.80
 MAX_CONCURRENT_POSITIONS = 10    # v4.0: 동시 보유 최대 10종목 (80% 노출 한도로 총 리스크 유지)
@@ -92,35 +130,62 @@ TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 ATR_PERIOD      = 14
 ATR_STOP_MULT   = 2.0           # 백테스트 호환용
 ATR_TARGET_MULT = 4.0           # 백테스트 호환용
-PROFIT_TARGET_1ST    = 2.5      # v4.1: 4→2.5% (실전 TP1 미도달 해소)
-PROFIT_TARGET_2ND    = 5.0      # v4.1: 8→5% (실현 가능한 2차 익절)
+PROFIT_TARGET_1ST    = 3.5      # v4.4: 5.0→3.5% (3일 실전: TP1 도달률 0% → 현실적 수준으로 하향)
+                                # 근거: 실전 평균 종목별 상승폭 2~4%, RSI78 퇴출 전 도달 가능 수준
+                                # R:R = 3.5% ÷ 5.0% = 0.7:1, 승률 60%+ 필요 (평균회귀 전략 기대 승률)
+                                # 비용(10bps) 차감 후 순이익 3.4% — 충분한 마진
+PROFIT_TARGET_2ND    = 7.0      # v4.4: 10.0→7.0% (실전 관측 최대 DOGE+9.6%, 7%는 도달 빈도 있는 구간)
+                                # 근거: TP1(3.5%) 부분익절 후 잔여 50%의 2차 타겟
+                                # DCA 평단가 인하 후 실질 8~9% 도달 → 7% 현실적
+                                # 대원칙4 "목표 수익률 도달 시 주저 없이 매도"
 PARTIAL_SELL_RATIO   = 0.5      # 1차 익절 시 매도 비율 (50%)
-LOSS_CUT_PCT         = 3.0      # v4.1: 4→3% (손실 비대칭 축소)
-REBUY_DROP_PCT       = 5.0      # v4.0: 매도가 대비 5% 하락 후에만 재매수
-STOP_COOLDOWN_HOURS  = 24       # 손절 후 재진입 쿨다운
-MIN_HOLD_HOURS       = 3        # 최소 보유시간
-MAX_HOLD_DAYS        = 5        # v4.1: 10→5일 (자본 회전율 개선)
-SIGNAL_THRESHOLD     = 20       # v4.0: 더 엄격한 신호
+LOSS_CUT_PCT         = 5.0      # v4.2: 3→5% (평균회귀 호흡 확보, DCA 후 실질 7~8% 버퍼)
+REBUY_DROP_PCT       = 3.0      # v4.2: 5→3% (평균회귀 사이클에 맞는 재진입 허용)
+STOP_COOLDOWN_HOURS  = 6        # v4.4: 12→6h (24h 마켓 세션 활용, 아시아→유럽→미국 3세션 참여)
+                                # 근거: 12h는 반나절 기회 상실. 6h = 코인 변동성 사이클 1주기
+                                # 대원칙5 "코인은 반드시 오르고 내린다" — 빠른 사이클 활용
+MIN_HOLD_HOURS       = 2        # v4.4: 4→2h (급등 시 TP1 즉시 실현 허용, 평균회귀 최소 호흡 유지)
+                                # 근거: 4h는 TP 도달해도 매도 불가 → 수익 반납 리스크
+                                # 2h = 1h봉 2개, 평균회귀 최소 확인 시간이자 수수료 대비 마진 확보 확보)
+                                # 근거: 1h봉 전략 → 최소 4캔들 관찰 후 매도 판단
+                                # 예외: TP1(+5%) 또는 SL(-5%) 도달 시에는 즉시 실행
+                                # 6.3h 평균 보유 → 12~24h로 자연 연장 기대
+MAX_HOLD_DAYS        = 10       # v4.3: 7→10일 (DCA 후 평균회귀 완성 시간 확보)
+                                # 근거: DCA 2회 진입 시 마지막 매수~반등 완성 7~10일 소요
+                                # TP2(10%) 도달에 필요한 시간 윈도우 확보
+SIGNAL_THRESHOLD       = 15     # 진입 전용: RSI+BB 강한 신호 2개면 매수 허용
+SIGNAL_EXIT_THRESHOLD  = -10    # v4.3 신설: 매도 전용 (강한 반전 신호에서만 퇴출)
+                                # 근거: 진입 후 시그널 자연 감소는 전략 작동 증거, 퇴출 사유 아님
+                                # -10 = RSI 과매수 + BB 상단 이탈 등 복합 반전 시에만 도달
 
 # v4.0: 분할매수 (평균회귀식 — 떨어지면 추가 매수)
 DCA_ENABLED            = True    # v4.0: 분할매수 활성화
-DCA_DROP_PCT           = 3.0     # 진입가 대비 3% 추가 하락 시 2차 매수
-DCA_MAX_ADDS           = 1       # 최대 1회 추가 매수
+DCA_DROP_PCT           = 2.5     # v4.2: 3→2.5% (조기 평단가 인하, 반등 포착 빠르게)
+DCA_MAX_ADDS           = 2       # v4.2: 1→2회 (거미줄 전략, 평단가 ~2.5% 인하)
 DCA_ADD_RATIO          = 0.5     # 초기 금액의 50% 추가 매수
 
+# v4.3 신설: 추세 필터 (하락 추세 DCA 방지)
+TREND_MA_PERIOD        = 120     # 120봉 이평선 (1시간봉 기준 5일)
+DCA_TREND_FILTER       = True    # True: 가격이 120MA 아래일 때 DCA 횟수를 1회로 제한
+                                 # 근거: 계단식 하락에서 DCA는 손실 규모를 키우는 독
+                                 # 대원칙2 "손절 최소화" — V자 반등 맹신 방지
+
 # v4.1: 거래대금 필터 (유동성 리스크 차단)
-MIN_VOLUME_24H         = 1.5e10  # 24시간 거래대금 15억원 이상만 매수
+MIN_VOLUME_24H         = 5e9     # v4.2: 150억→50억원 (종목 풀 4개 복원, 최소 유동성 유지)
 
 # v4.1: 트레일링 익절 (수익 보존)
-TRAILING_ACTIVATE_PCT  = 1.2     # +1.2% 이상에서 트레일링 활성화
-TRAILING_CALLBACK_PCT  = 0.7     # 고점 대비 -0.7% 하락 시 매도
+TRAILING_ACTIVATE_PCT  = 7.0     # v4.3: TP1(5%)+버퍼 → TP2(10%) 향하는 잔여분 보호용
+                                 # 근거: 3.5%에서 활성화하면 TP1과 간섭 → 잔여분 즉시 청산
+                                 # 7%에서 활성화 = TP1 부분매도 후 추가 +2%p 상승 확인 후 보호
+TRAILING_CALLBACK_PCT  = 2.0     # v4.3: 1.5→2.0% (크립토 1h봉 평균 변동폭 1.5% 감안)
+                                 # 근거: 1.5% 콜백은 정상 변동에도 트리거 → 2.0%로 노이즈 필터
 
 # 서킷브레이커
 CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
 DAILY_DD_LIMIT     = 0.08  # v3.0: 5%→8% 회복 시간 확보
 
 # 중복 주문 방지 (v2.1: 타임스탬프 기반)
-ORDER_COOLDOWN_MINUTES = 90  # 동일 종목/방향 주문 최소 간격 (분)
+ORDER_COOLDOWN_MINUTES = 30  # v4.2: 90→30분 (1시간봉 내 재시도 허용)
 
 # 파일 경로
 _BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
