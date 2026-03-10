@@ -453,7 +453,8 @@ def sync_portfolio_with_upbit(portfolio):
             ticker = f"KRW-{currency}"
             volume = float(b.get("balance", 0)) + float(b.get("locked", 0))
             avg_price = float(b.get("avg_buy_price", 0))
-            if ticker in TICKERS and volume > 0:
+            # v5.2: TICKERS + 포트폴리오 보유 종목 모두 동기화 (고아 포지션 포함)
+            if (ticker in TICKERS or ticker in portfolio) and volume > 0:
                 actual[ticker] = {
                     "volume": volume,
                     "entry_price": avg_price,
@@ -1709,6 +1710,31 @@ def main():
         print(f"      손절:{_fmt_krw(r['stop_loss'])} 익절:{_fmt_krw(r['take_profit'])} "
               f"Sharpe:{r['backtest']['sharpe']:.1f}")
 
+    # v5.2: 고아 포지션 매도 체크 — TICKERS에서 제거됐지만 아직 보유 중인 종목
+    orphan_tickers = [t for t in portfolio if t not in ("_meta", "_sell_memory") and t not in TICKERS]
+    if orphan_tickers:
+        print(f"\n🔍 고아 포지션 감지: {', '.join(t.replace('KRW-', '') for t in orphan_tickers)}")
+        for ticker in orphan_tickers:
+            name = ticker.replace("KRW-", "")
+            try:
+                cur_price = pyupbit.get_current_price(ticker)
+                if cur_price and cur_price > 0:
+                    results.append({
+                        "ticker": ticker, "signal": "CLOSE", "price": cur_price,
+                        "close_reason": "ORPHAN_POSITION",
+                        "ensemble_score": 0, "confidence": 0, "rsi": 0, "adx": 0,
+                        "position": {"position_krw": 0, "position_pct": 0},
+                        "stop_loss": 0, "take_profit": 0,
+                        "backtest": {"sharpe": 0},
+                    })
+                    pos = portfolio[ticker]
+                    pnl_pct = (cur_price / pos["entry_price"] - 1) * 100 if pos["entry_price"] > 0 else 0
+                    print(f"   🚨 {name} 고아 포지션 → 매도 예정 (현재가 {_fmt_krw(cur_price)}, PnL {pnl_pct:+.1f}%)")
+                else:
+                    print(f"   ⚠️ {name} 현재가 조회 실패 — 다음 사이클에서 재시도")
+            except Exception as e:
+                print(f"   ⚠️ {name} 고아 포지션 가격 조회 오류: {e}")
+
     # Phase 2: 서킷브레이커
     # v2.1: 알림 모드에서는 CB 계산이 부정확하므로 (capital=INITIAL_CAPITAL 고정) 매매 차단만 적용
     cb_triggered, drawdown, ref_val, cb_type = check_circuit_breaker(
@@ -1827,7 +1853,7 @@ def main():
 
         # v4.0: 신호 매도도 최소 보유시간 적용 (STRONG_CLOSE/PROFIT_TARGET/STOP_LOSS 제외)
         if r["signal"] == "CLOSE" and ticker in portfolio:
-            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP", "TRAILING_STOP"):
+            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP", "TRAILING_STOP", "ORPHAN_POSITION"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 if entry_date_str and entry_date_str != "synced":
                     try:
@@ -2056,9 +2082,10 @@ def main():
                                 f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl:+.1f}%)\n"
                                 f"(체결 확인: 다음 sync)")
                             print(f"   🤖 매도 주문 접수 ({close_reason}): {_fmt_krw(r['price'])}")
-                            chart = generate_chart(ticker, signal_data[ticker], r)
-                            if chart:
-                                send_telegram_photo(chart, f"📤 {name} SELL {_fmt_krw(r['price'])}")
+                            if ticker in signal_data:
+                                chart = generate_chart(ticker, signal_data[ticker], r)
+                                if chart:
+                                    send_telegram_photo(chart, f"📤 {name} SELL {_fmt_krw(r['price'])}")
                         else:
                             send_telegram(f"❌ <b>{name}</b> 매도 주문 실패 — 수동 확인 필요")
                 else:
@@ -2066,9 +2093,10 @@ def main():
                     msg = format_signal_message(r)
                     if msg:
                         send_telegram(msg)
-                    chart = generate_chart(ticker, signal_data[ticker], r)
-                    if chart:
-                        send_telegram_photo(chart, msg[:1024] if msg else f"{name} SELL")
+                    if ticker in signal_data:
+                        chart = generate_chart(ticker, signal_data[ticker], r)
+                        if chart:
+                            send_telegram_photo(chart, msg[:1024] if msg else f"{name} SELL")
                     print(f"   📋 {name} 청산 신호 ({close_reason}) ({'서킷브레이커' if cb_triggered else '알림만'})")
 
     # 특이사항 알림
