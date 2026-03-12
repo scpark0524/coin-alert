@@ -1,5 +1,19 @@
 """
-🪙 Coin Alert System v5.4 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.8 — Upbit KRW 자동매매
+
+v5.8: BTC 레짐 필터 단축 (2026-03-12)
+- [조정] BTC_REGIME_MA_PERIOD 30→20 (risk-off 과잉 지속 해소)
+
+v5.7: 쿨다운 과잉 차단 해소 (2026-03-12)
+- [조정] STOP_COOLDOWN_HOURS 6→4h (야간 손절 후 오전 차단 해소)
+- [조정] ORDER_COOLDOWN_MINUTES 120→60분 (실매수 미체결 대응)
+
+v5.6: 진입 기회 확대 (2026-03-12)
+- [조정] RSI_OVERSOLD 35→40, BB_STD 1.5→1.3, MIN_ENTRY_SCORE 6→5
+- [조정] MIN_VOLUME_24H 200→100억원 (유니버스 병목 해소)
+
+v5.5: 분산 투자 정상화 (2026-03-12)
+- [조정] MAX_CONCURRENT_POSITIONS 2→3 (증액 반영)
 
 v5.4: Ticker 유니버스 확대 + 자금 증액 (2026-03-11)
 - [확대] Tier A 4종 추가: EOS, XLM, ETC, PEPE (500억+ 유동성 검증)
