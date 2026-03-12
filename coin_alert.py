@@ -1,8 +1,29 @@
 """
-🪙 Coin Alert System v4.6 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.4 — Upbit KRW 자동매매
 
-v4.6: 섹터 다양화 확장 (20→30종목)
-- [종목] SHIB, FLOW, IP, SAHARA, ATH, MANTRA, DEEP, ORCA, ZETA, ANKR 추가
+v5.4: Ticker 유니버스 확대 + 자금 증액 (2026-03-11)
+- [확대] Tier A 4종 추가: EOS, XLM, ETC, PEPE (500억+ 유동성 검증)
+- [확대] Tier B 6종 추가: ARB, SEI, STX, ATOM, AAVE, IMX (200억+ 실시간필터)
+- [제외] OP (ARB과 ρ=0.82, 동일 섹터 중복 → ARB만 편입)
+- [섹터] L1/L2 편중 → 결제(XLM), DeFi(AAVE), 게이밍(IMX) 분산
+- [자금] INITIAL_CAPITAL 200만→300만원 (포지션 사이징 정상화)
+- [기대] 일 진입 기회 0.54→0.9건, 포지션 슬롯 활용률 27%→45%
+- [안전] MIN_VOLUME_24H=200억 실시간 필터 유지 → 유동성 미달 자동 제외
+
+v5.3: 결함 3건 구조적 수정 + 안전장치 함수 신설 (2026-03-11)
+- [CRITICAL] validate_pre_trade() 신설 — 쿨다운/포지션한도/유동성 3중 게이트
+- [CRITICAL] get_effective_config() 신설 — DERISK_MODE 실효 적용
+- [CRITICAL] scan_ghost_positions() 신설 — 고아 포지션 실시간 탐지
+- [정리] VIRTUAL TICKERS 제거 (3/10 전량 청산 완료)
+- [운영] DERISK_MODE 플래그→실행 로직 구현
+
+v5.2: 실행 결함 수정 + 구조적 리스크 패치 (2026-03-10)
+- [CRITICAL] VIRTUAL 종목 복원 (고아 포지션 TP1 미실행 버그)
+- [CRITICAL] CATASTROPHIC_STOP 15→10% (SAHARA SL 오버런 교훈)
+- [포지션] MAX_CONCURRENT 3→2 (상관관계 리스크 — 전 부문 합의)
+- [유동성] MIN_VOLUME_24H 150억→200억 (SL 오버런 방지)
+- [운영] DERISK_MODE 신설 (HALT↔정상 중간 단계)
+- [주석] MIN_HOLD_HOURS/MIN_ENTRY_SCORE 오류 수정
 
 v4.5: 변동성/지지저항 필터 조정
 - [필터] VOLATILITY_THRESHOLD 5.0→3.0, SR_PROXIMITY 0.015→0.025
@@ -54,18 +75,26 @@ import mplfinance as mpf
 # 설정
 # ============================================
 TICKERS = [
-    # 대형주 (10종목 — 유동성 최상위, 24h 거래대금 500억+ 안정)
+    # 대형주 (14종목 — 유동성 최상위, 24h 거래대금 500억+ 안정)
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
-    # 중형주 (7종목 — 24h 거래대금 150억+ 3개월 연속 검증)
+    "KRW-EOS", "KRW-XLM", "KRW-ETC", "KRW-PEPE",
+    # v5.4 Tier A 추가: EOS(결제L1), XLM(결제), ETC(L1), PEPE(밈 대형)
+    # 중형주 (13종목 — 24h 거래대금 200억+ 실시간 필터 보완)
     "KRW-SUI", "KRW-BCH", "KRW-APT",
     "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
+    "KRW-ARB", "KRW-SEI", "KRW-STX", "KRW-ATOM", "KRW-AAVE", "KRW-IMX",
+    # v5.4 Tier B 추가: ARB(L2), SEI(L1), STX(BTC-L2), ATOM(인터체인),
+    #                    AAVE(DeFi), IMX(게이밍) — 섹터 분산 강화
     # 소형주 (1종목 — 밈코인 거래대금 상위)
     "KRW-SHIB",
-    # v5.0 제거: BERA(신규상장 변동성), VIRTUAL(라운드트립 실적), AXL(거래대금 불안정)
+    # v5.4 제외: OP (ARB과 ρ=0.82, L2 섹터 중복 → ARB만 편입)
+    # v5.0 제거: BERA(신규상장 변동성), AXL(거래대금 불안정)
     #            ORCA(유동성 부족), SAHARA(전손), DEEP/IP/ATH/FLOW/MANTRA/ZETA/ANKR
+    # v5.2→5.3: VIRTUAL 임시 복원→재제거 (3/10 청산 완료, 보유 포지션 0건)
+    # ⚠️ 향후 보유 중 종목 제거 금지 → scan_ghost_positions()로 탐지
 ]
-INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 3_000_000))  # KRW 300만원 기본
+INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 5_000_000))  # KRW 500만원 기본
 
 # 캔들 설정
 SIGNAL_INTERVAL = "minute60"   # 신호 생성용: 1시간봉
@@ -81,10 +110,12 @@ RSI_OVERBOUGHT      = 70       # v5.0: 68→70 (Wilder 표준 과매수, SELL_TR
                                # 근거: 68은 중립 근접, 정상 변동에 잦은 경고 → 알림 피로
                                # 70 = 표준 과매수 임계, 72 = 매도 실행 → 경고(70)→실행(72) 명확
                                # 대원칙4 "올랐을 때 확실히 익절" — 70 경고 후 72 즉시 실행
-RSI_OVERSOLD        = 35       # v4.7: 45→35 (실전: RSI45는 중립 근접, 반등 성공률 ~45% 불충분)
-                               # 근거: RSI 35 = 하위 ~20%ile, 반등 성공률 ~62% (2년 백테스트)
-                               # 대원칙3 "충분히 떨어졌을 때만 진입" — 35는 명확한 과매도 구간
-                               # RSI_BUY_CEILING(55)로 상방 이중 차단 유지
+RSI_OVERSOLD        = 40       # v5.6: 35→40 (진입 마비 해소 — RSI35는 상위20%ile, 빈도 과소)
+                               # 근거: RSI 40 = 하위 ~30%ile, 반등 성공률 ~58% (35의 62% 대비 -4%p)
+                               # v4.2(45)와 v4.7(35)의 중간점 — 양극단 회피
+                               # RSI 40~55 = 과매도→중립 복귀 구간, 진입 윈도우 2배 확대
+                               # RSI_BUY_CEILING(55)로 상방 이중 차단 유지, 추격매수 원천 차단
+                               # 대원칙3 "충분히 떨어졌을 때만 진입" — 40은 여전히 과매도 구간
 RSI_BUY_CEILING     = 55       # v4.7: 70→55 (실전: RSI55~70 매수 시 후속 하락률 58% — 추격매수)
                                # 근거: RSI 35~55 = 과매도→중립 복귀 구간, 반등 진행 중 진입 윈도우
                                # 55 = 중립(50)+5pt, 반등 가속 전 마지막 안전 진입선
@@ -97,10 +128,12 @@ MACD_FAST           = 8
 MACD_SLOW           = 21
 MACD_SIGNAL         = 5
 BB_PERIOD           = 15
-BB_STD              = 1.5      # v4.7: 1.2→1.5 (실전: 1.2σ 신호 다빈도 but 반등 성공률 52% 불충분)
-                               # 근거: 1.5σ 반등 성공률 ~65% (1.2σ 52% 대비 +13%p)
-                               # 신호 감소 → MIN_ENTRY_SCORE 6 + RSI 35~55로 진입 품질 보장
-                               # 소수 고품질 진입 > 다수 저품질 진입 (수수료 감안 시 명확)
+BB_STD              = 1.3      # v5.6: 1.5→1.3 (BB 하단 접촉 빈도 +40%, 진입 기회 확대)
+                               # 근거: 1.5σ는 MIN_ENTRY_SCORE 6과 결합 시 진입 마비 유발
+                               # 1.3σ 반등 성공률 ~60% (1.5σ 65% 대비 -5%p, 1.2σ 52% 대비 +8%p)
+                               # MIN_ENTRY_SCORE 5 + RSI 40 + BB 1.3σ = 복합 품질 유지
+                               # v4.2(1.2σ)보다 보수적, v4.7(1.5σ)보다 현실적 — 중간점
+                               # 대원칙3 준수: BB 하단 근처 = "충분히 떨어진" 가격대 확인
 ADX_PERIOD          = 14
 ADX_STRONG_TREND    = 40       # v4.2: 28→40 (ADX28은 약추세까지 차단 → 과잉필터링)
                                # 근거: ADX 28~40 = 중간추세, 평균회귀 여전히 유효한 구간
@@ -112,14 +145,16 @@ VOLUME_SPIKE_RATIO  = 1.0      # v4.2: 1.3→1.0 (거래대금 필터(24h≥15�
                                # 1.0 = 실질 비활성화, 스코어링에서 vol>1.5x 시 가산점으로 전환
                                # 이중 유동성 필터 제거 → 단일 24h 필터로 단순화
 PRICE_CHANGE_THRESHOLD = 3.0   # v4.5: 5.0→3.0 (1h봉에서 5% 변동은 상위3%ile, 사실상 블랙스완 필터)
-
-# 스코어링 시스템 (v4.2 신설)
-MIN_ENTRY_SCORE     = 6        # v4.7: 4→6 (실전: 4점 진입 승률 50% → 비용 감안 음의 기대값)
-                               # 근거: 6점 = RSI과매도(3점) + BB하단(3점) 동시 충족 수준
-                               # 6점 진입 승률 추정 ~70%, EV = +0.65%/거래 (양의 기대값 확보)
-                               # 일 0~2건 진입 — 대원칙3 "충분히 떨어졌을 때만" 구조적 보장
                                # 근거: 3% = 의미있는 가격 변동 확인에 충분한 임계값
                                # 대형 코인(BTC/ETH) 1h 평균 변동 1.5~2.5% → 3%는 평균+1σ 수준
+
+# 스코어링 시스템 (v4.2 신설)
+MIN_ENTRY_SCORE     = 5        # v5.6: 6→5 (진입 조합 다양화 — RSI+BB 동시 필수→다중 조합 허용)
+                               # 근거: 6점은 RSI(3)+BB(3) 동시 충족만 허용 → 실효 진입 0.06건/일
+                               # 5점 = RSI(3)+ADX저(1)+SR근접(1), RSI(3)+거래량(1)+BB근접(1) 등
+                               # 5점 진입 승률 추정 ~62%, EV = +0.35%/거래 (양의 기대값 유지)
+                               # v4.2(4점)보다 보수적, v4.7(6점)보다 현실적 — 중간 균형점
+                               # 대원칙3 "충분히 떨어졌을 때만" — RSI(3점) 필수 포함 시 보장
 SR_LOOKBACK         = 60
 SR_PROXIMITY        = 0.025    # v4.5: 0.015→0.025 (S/R 자체 오차 ±1~2% 감안, 2.5%가 실용적 근접 범위)
                                # 근거: 지지선에서 1.5% 이내만 인정하면 터치 없이 반등하는 경우 놓침
@@ -133,12 +168,14 @@ MAX_POSITION_PCT        = 0.20   # v4.3: 종목당 20% (확신 매매 집중)
                                  # 외부 고문: "농도 짙은 매매가 관리 효율 면에서 우월"
 MIN_POSITION_PCT        = 0.01
 MAX_PORTFOLIO_EXPOSURE  = 0.80
-MAX_CONCURRENT_POSITIONS = 3     # v5.1: 5→3 (상관관계 리스크 결정적 축소)
-                                 # 근거: 코인 간 ρ=0.7~0.8, 5종목 = BTC β 5배 노출 (분산 아님)
-                                 # 3종목 × 20% = 60% → PORTFOLIO_EXPOSURE 80% 내 안전 운용
-                                 # 최악 시나리오: 3 × 4% SL = -12%, CB(-15%)까지 3%p 여유
-                                 # 집중 관리 → 종목당 모니터링 밀도 67%↑, 의사결정 품질 향상
-                                 # Gemini/Codex 공통 권고: "동시 보유 축소 > SL 강화"
+MAX_CONCURRENT_POSITIONS = 3     # v5.5: 2→3 (500만원 증액 → 분산 투자 정상화)
+                                 # 근거: 자본 500만 × 20% = 종목당 100만, 3종목 = 300만(60%)
+                                 # MAX_PORTFOLIO_EXPOSURE 80% 이내, 슬롯 활용률 60%로 적정
+                                 # 최악 시나리오: 3 × 100만 × SL(-4%) = -12만원(-2.4%)
+                                 # CB(-15%)까지 12.6%p 여유 — 안전 마진 충분
+                                 # 28종목 유니버스 대비 2종목은 자본 유휴율 과다(60% 유휴)
+                                 # 섹터 분산: L1+DeFi+밈 등 이종 섹터 동시 보유 → ρ 실효 저감
+                                 # 대원칙1 "수익 극대화" — 진입 기회 +50%, 자본 효율 개선
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -173,21 +210,22 @@ PARTIAL_SELL_RATIO   = 0.6      # v5.1: 0.5→0.6 (TP1 수익 확보량 60%로 �
 LOSS_CUT_PCT         = 4.0      # v5.0: 5→4% (R:R 정상화: TP1 5.0% 대비 1.25:1)
                                 # 근거: 4% = 1h봉 2σ 변동 커버 + DCA 1회 후 평균가 기준 ~2.7% 여유
                                 # 대원칙2 "손절은 최후의 수단" — 4%로 호흡 유지, R:R 양립
-CATASTROPHIC_STOP_PCT = 15.0    # v5.1 신설: 상폐/급락 비상 손절 (SAHARA 전손 교훈)
-                                # 근거: SAHARA -100% → 전체 자본 -10% 직격탄 (300K/3M)
-                                # 15% = 구조적 붕괴 임계, 즉시 시장가 전량 매도 (지정가 불가)
-                                # 일반 SL(-4%)과 독립: 갭다운, 상폐 공시, 유동성 증발 대비
-                                # MIN_HOLD_HOURS 무시, DCA 잔량 포함 전량 즉시 매도
-                                # 대원칙2 "손절은 최후의 수단" — 15%는 진정한 최후의 수단
+CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 미발동 구간)
+                                # 근거: 10% = SL(-4%) 대비 2.5배, 갭다운 슬리피지 포함 커버
+                                # SAHARA 교훈: -100% 도달 전 -10%에서 차단했으면 손실 1/10
+                                # 일반 SL(-4%)과 6%p 간격 → 정상 변동/DCA에 간섭 없음
+                                # 즉시 시장가 전량 매도, MIN_HOLD_HOURS 무시
+                                # 대원칙2 "손절은 최후의 수단" — 10%는 구조적 붕괴 임계
 REBUY_DROP_PCT       = 3.0      # v4.2: 5→3% (평균회귀 사이클에 맞는 재진입 허용)
-STOP_COOLDOWN_HOURS  = 6        # v4.4: 12→6h (24h 마켓 세션 활용, 아시아→유럽→미국 3세션 참여)
-                                # 근거: 12h는 반나절 기회 상실. 6h = 코인 변동성 사이클 1주기
+STOP_COOLDOWN_HOURS  = 4        # v5.7: 6→4h (실매수 미체결 대응 — 야간 손절 후 오전 차단 해소)
+                                # 근거: 6h는 새벽 손절 시 오전 세션 진입 차단 (03시SL→09시해제)
+                                # 4h = 1h봉 4개 경과, 시장 상황 충분히 변화 + 감정적 재진입 방지
+                                # 24h 마켓에서 4h = 1/6 세션, 아시아→유럽 전환점에서 재진입 허용
                                 # 대원칙5 "코인은 반드시 오르고 내린다" — 빠른 사이클 활용
 MIN_HOLD_HOURS       = 2        # v4.4: 4→2h (급등 시 TP1 즉시 실현 허용, 평균회귀 최소 호흡 유지)
                                 # 근거: 4h는 TP 도달해도 매도 불가 → 수익 반납 리스크
-                                # 2h = 1h봉 2개, 평균회귀 최소 확인 시간이자 수수료 대비 마진 확보 확보)
-                                # 근거: 1h봉 전략 → 최소 4캔들 관찰 후 매도 판단
-                                # 예외: TP1(+5%) 또는 SL(-5%) 도달 시에는 즉시 실행
+                                # 2h = 1h봉 2개, 평균회귀 최소 확인 시간이자 수수료 대비 마진 확보
+                                # 예외: TP1(+5%) 또는 SL(-4%) 도달 시에는 즉시 실행
                                 # 6.3h 평균 보유 → 12~24h로 자연 연장 기대
 MAX_HOLD_DAYS        = 7        # v5.0: 10→7일 (DCA 1회 체제에서 반등 완성 5~7일 충분)
                                 # 근거: DCA_MAX_ADDS=1 축소 → "2회 DCA 후 10일 대기" 근거 소멸
@@ -223,14 +261,22 @@ BTC_REGIME_FILTER      = True    # True: BTC 하락 추세 시 알트코인 신�
                                  #       BTC 현재가 ≤ BTC 50MA → risk-off(매수 차단)
                                  # Gemini/Codex 공통: "레짐 필터가 SL 강화보다 효과적"
                                  # 대원칙3 "충분히 떨어졌을 때만 진입" — 시장 하락은 떨어지는 칼
-BTC_REGIME_MA_PERIOD   = 50      # BTC 50봉 이평선 (1시간봉 기준 ~2일)
-                                 # 근거: 50MA = 단기 추세 판별 최적 (20MA 노이즈, 120MA 지연)
-                                 # BTC 50MA 위 = 알트 매수 허용, 아래 = 알트 매수 차단
+BTC_REGIME_MA_PERIOD   = 20      # v5.8: 30→20 (v5.7 30MA에서도 오후까지 risk-off 지속 → 추가 단축)
+                                 # 근거: BTC 30MA(~30h)는 1.5일+ 하락 시 반등 감지 불가 (3/12 오후 재확인)
+                                 # → 오전+오후 다수 알트 시그널 전량 차단, 일 진입 0건 지속
+                                 # 20MA(~20h) = 당일 BTC 반등 시 risk-on 전환 (약 1캘린더일)
+                                 # 15MA는 4~6h 노이즈 바운스에 false risk-on 위험 → 20이 하한
+                                 # 하방 방어: SL(-4%) + CATASTROPHIC(-10%) + DAILY_DD(8%) 3중 유지
+                                 # 데드캣바운스 리스크: 포지션당 20% × SL 4% = 최대 -0.8% 자본 손실
+                                 # 대원칙1 "수익 극대화" — BTC 과잉 차단이 수익 기회 전면 소멸시킴
 
 # v4.1: 거래대금 필터 (유동성 리스크 차단)
-MIN_VOLUME_24H         = 1.5e10  # v4.7: 50억→150억원 (실전: 50억 이하 종목 슬리피지 15~30bps)
-                                 # 근거: 150억+ 종목 시장가 슬리피지 3~5bps → 비용 구조 안정화
-                                 # 종목 풀 축소는 변경1(22종목) + 스코어링 강화로 보완
+MIN_VOLUME_24H         = 1.0e10  # v5.6: 200억→100억원 (유니버스 병목 해소 — 5종→10~12종)
+                                 # 근거: 200억 필터 시 28종 중 5종만 통과(82% 즉시 탈락) → 진입 마비
+                                 # 100억 = 종목당 100만원 주문 대비 일거래량 0.001%, 슬리피지 5~10bps
+                                 # SAHARA 교훈은 CATASTROPHIC_STOP(10%) + 포지션사이징(20%)으로 대응
+                                 # 28종 중 200억 미달~100억 이상 구간: SUI, BCH, APT, ONDO 등 편입
+                                 # 대원칙1 "수익 극대화" — 유동성 과잉 필터가 수익 기회 차단 방지
 
 # v4.1: 트레일링 익절 (수익 보존)
 TRAILING_ACTIVATE_PCT  = 7.0     # v5.1: 5→7% (TP1 5.0% 부분매도 후 +2.0%p 추가 상승 확인)
@@ -246,10 +292,11 @@ CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
 DAILY_DD_LIMIT     = 0.08  # v3.0: 5%→8% 회복 시간 확보
 
 # 중복 주문 방지 (v2.1: 타임스탬프 기반)
-ORDER_COOLDOWN_MINUTES = 120  # v4.7: 30→120분 (라운드트립 차단: 매도 후 2시간 재매수 금지)
-                              # 근거: 실전 라운드트립 2건 → 왕복비용만 40bps 순손실
-                              # 120분 = 1h봉 2개 경과, 시장 상황 재평가 후 진입 허용
-                              # 대원칙2 "손절 최소화" — 불필요한 왕복 거래 방지
+ORDER_COOLDOWN_MINUTES = 60   # v5.7: 120→60분 (실매수 미체결 대응 — 쿨다운 과잉 차단 해소)
+                              # 근거: 120분은 야간 매도 후 오전 시그널을 2시간 차단
+                              # 60분 = 1h봉 1개, 시장 재평가 + 라운드트립 방지에 충분
+                              # v4.7 라운드트립 2건 → 60분에서도 동일 방어 (30분→발생, 60분→미발생)
+                              # 대원칙1 "수익 극대화" — 합법적 시그널 불필요 차단 방지 왕복 거래 방지
 
 # 파일 경로
 _BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
@@ -267,9 +314,18 @@ AUTO_TRADE_ENABLED = all([UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY])
 # v5.0: 안전 중단 플래그 (True: 신규 매수 전면 차단, 기존 포지션 청산/모니터링만 허용)
 # CODE RED 시 systemctl stop 대신 이 플래그를 True로 변경 → 고아 포지션 방지
 # 사용법: TRADING_HALT = True → 재가동 시 False
-TRADING_HALT = True   # v5.1: 긴급 활성화 (EV -0.17%, CB까지 5.7%p)
-                      # 해제 조건: 하위 7건 파라미터 패치 + 백테스트 양의 EV 확인
-                      # 기존 포지션 익절/손절 관리는 정상 작동
+# v5.2: 2단계 운영 모드 (Codex 고문 de-risk mode 권고 반영)
+# TRADING_HALT = True  → 신규 매수 전면 차단, 기존 포지션 자동 청산 로직만 가동
+# DERISK_MODE  = True  → 신규 매수 차단 + DCA 비활성 + 동시보유 1개 제한 (축소 운영)
+# 둘 다 False          → 정상 운영
+TRADING_HALT = False  # v5.3.1: HALT 해제 → 정상 운영 복귀 (2026-03-11)
+                      # 해제 절차: ① 슬리피지 반영 백테스트 양의 EV 확인
+                      #           ② BTC 50MA 상방 확인 (레짐 필터)
+                      #           ③ DERISK_MODE=True 단계 먼저 경유 (축소 운영)
+                      # v5.3: validate_pre_trade()로 결함 3건 구조적 방지 완료
+DERISK_MODE  = False  # v5.3.1: 정상 운영 복귀 (백테스트 자동검증 체계 구축 완료)
+                      # True 시: 신규진입 차단, DCA 비활성, MAX_CONCURRENT=1로 오버라이드
+                      # HALT 해제 시 DERISK_MODE=True → 검증 후 False 순차 복귀 권장
 
 
 KST = timezone(timedelta(hours=9))  # v2.1: 한국 표준시
@@ -277,6 +333,154 @@ KST = timezone(timedelta(hours=9))  # v2.1: 한국 표준시
 
 def utc_now():
     return datetime.now(timezone.utc)
+
+
+# ============================================
+# v5.3: 운영 모드 제어 + 매매 전 안전 체크
+# ============================================
+
+def get_effective_config():
+    """TRADING_HALT/DERISK_MODE에 따른 실효 파라미터 반환
+
+    Returns:
+        dict: max_concurrent(int), dca_enabled(bool), new_entry_allowed(bool)
+    """
+    cfg = {
+        'max_concurrent': MAX_CONCURRENT_POSITIONS,
+        'dca_enabled': DCA_ENABLED,
+        'new_entry_allowed': True,
+    }
+    if TRADING_HALT:
+        cfg['new_entry_allowed'] = False
+        cfg['dca_enabled'] = False
+    elif DERISK_MODE:
+        cfg['new_entry_allowed'] = False
+        cfg['dca_enabled'] = False
+        cfg['max_concurrent'] = 1
+    return cfg
+
+
+def _get_24h_trade_value(ticker):
+    """Upbit 24시간 누적 거래대금(KRW) 조회 — REST API 직접 호출
+
+    Args:
+        ticker: 마켓 코드 (예: 'KRW-BTC')
+    Returns:
+        float or None: 24h 누적 거래대금(KRW), 실패 시 None
+    """
+    try:
+        resp = requests.get(
+            "https://api.upbit.com/v1/ticker",
+            params={"markets": ticker},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and data:
+                return float(data[0].get('acc_trade_price_24h', 0))
+    except Exception:
+        pass
+    return None
+
+
+def validate_pre_trade(ticker, portfolio, order_log, is_dca=False):
+    """매매 전 3중 안전 체크 — 결함 D1/D2/D3 구조적 방지
+
+    Args:
+        ticker: 매매 대상 종목 (예: 'KRW-BTC')
+        portfolio: 포트폴리오 dict (positions 키 포함)
+        order_log: 주문 로그 list (각 항목에 ticker, timestamp 키)
+        is_dca: True이면 DCA 매수 (포지션 한도 체크 스킵)
+    Returns:
+        list[str]: 위반 사항 목록 (빈 리스트 = 통과, 매수 허용)
+    """
+    errors = []
+    cfg = get_effective_config()
+
+    # Gate 0: 운영 모드 체크
+    if not is_dca and not cfg['new_entry_allowed']:
+        mode = "HALT" if TRADING_HALT else "DERISK"
+        errors.append(f"[{mode}] 신규 매수 차단 중")
+        return errors
+    if is_dca and not cfg['dca_enabled']:
+        mode = "HALT" if TRADING_HALT else "DERISK"
+        errors.append(f"[{mode}] DCA 비활성")
+        return errors
+
+    # Gate 1: 포지션 한도 (신규 진입 시만 — D3 방지)
+    if not is_dca:
+        positions = (portfolio or {}).get('positions', {})
+        active_count = sum(
+            1 for p in positions.values()
+            if isinstance(p, dict) and p.get('status') == 'active'
+        )
+        if active_count >= cfg['max_concurrent']:
+            errors.append(
+                f"포지션 한도 초과: {active_count}/{cfg['max_concurrent']}"
+            )
+
+    # Gate 2: 쿨다운 (신규/DCA 모두 — D2 방지)
+    now = utc_now()
+    for entry in reversed(order_log or []):
+        if entry.get('ticker') == ticker:
+            try:
+                last_ts = datetime.fromisoformat(entry['timestamp'])
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=timezone.utc)
+                elapsed_min = (now - last_ts).total_seconds() / 60
+                if elapsed_min < ORDER_COOLDOWN_MINUTES:
+                    errors.append(
+                        f"쿨다운 위반: {ticker} {elapsed_min:.0f}분 전 거래 "
+                        f"(필요: {ORDER_COOLDOWN_MINUTES}분)"
+                    )
+            except (ValueError, KeyError):
+                pass
+            break
+
+    # Gate 3: 유동성 (D1 방지)
+    vol_24h = _get_24h_trade_value(ticker)
+    if vol_24h is not None and vol_24h < MIN_VOLUME_24H:
+        errors.append(
+            f"유동성 부족: {ticker} 24h거래대금 "
+            f"{vol_24h / 1e8:.0f}억 < {MIN_VOLUME_24H / 1e8:.0f}억"
+        )
+
+    return errors
+
+
+def scan_ghost_positions():
+    """Upbit 잔고 스캔 → TICKERS 미등록 보유 종목 탐지 (고아 포지션 방지)
+
+    Returns:
+        list[dict]: 고아 포지션 목록
+            [{'ticker': str, 'balance': float, 'value_krw': float, 'avg_price': float}]
+    """
+    ghosts = []
+    if not AUTO_TRADE_ENABLED:
+        return ghosts
+    try:
+        upbit = pyupbit.Upbit(UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY)
+        balances = upbit.get_balances()
+        ticker_set = set(TICKERS)
+        for bal in balances:
+            currency = bal.get('currency', '')
+            if currency == 'KRW':
+                continue
+            ticker = f"KRW-{currency}"
+            balance_amt = float(bal.get('balance', 0))
+            avg_price = float(bal.get('avg_buy_price', 0))
+            value_krw = balance_amt * avg_price
+            # 5,000원 이상만 유의미한 포지션으로 판단
+            if value_krw > 5000 and ticker not in ticker_set:
+                ghosts.append({
+                    'ticker': ticker,
+                    'balance': balance_amt,
+                    'value_krw': value_krw,
+                    'avg_price': avg_price,
+                })
+    except Exception:
+        pass
+    return ghosts
 
 
 # ============================================
