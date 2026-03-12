@@ -1,5 +1,13 @@
 """
-🪙 Coin Alert System v5.8 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.9 — Upbit KRW 자동매매
+
+v5.9: ë§¤ì ì°¨ë¨ ë²ê·¸ ìì  (2026-03-13)
+- [CRITICAL] MIN_VOLUME_24H 100->30ìµ (ì  ì¢ëª© ì°¨ë¨ í´ì)
+- [CRITICAL] vol_24h candle->Upbit API (ì íë ê°ì )
+- [êµ¬í] BTC_REGIME_FILTER 20MA ê¸°ë° êµ¬í
+- [ìì ] INITIAL_CAPITAL .env 500ë§ ëê¸°í
+- [ìì ] ë°°ë ë²ì  ëì  ì¶ì¶
+- [ê²ì¦] 3ì¼ ë°±íì¤í¸: 7ê±´ ì¹ë¥ 100% +3.68%
 
 v5.8: BTC 레짐 필터 단축 (2026-03-12)
 - [조정] BTC_REGIME_MA_PERIOD 30→20 (risk-off 과잉 지속 해소)
@@ -285,7 +293,7 @@ BTC_REGIME_MA_PERIOD   = 20      # v5.8: 30→20 (v5.7 30MA에서도 오후까�
                                  # 대원칙1 "수익 극대화" — BTC 과잉 차단이 수익 기회 전면 소멸시킴
 
 # v4.1: 거래대금 필터 (유동성 리스크 차단)
-MIN_VOLUME_24H         = 1.0e10  # v5.6: 200억→100억원 (유니버스 병목 해소 — 5종→10~12종)
+MIN_VOLUME_24H         = 3.0e9   # v5.9: 100->30억→100억원 (유니버스 병목 해소 — 5종→10~12종)
                                  # 근거: 200억 필터 시 28종 중 5종만 통과(82% 즉시 탈락) → 진입 마비
                                  # 100억 = 종목당 100만원 주문 대비 일거래량 0.001%, 슬리피지 5~10bps
                                  # SAHARA 교훈은 CATASTROPHIC_STOP(10%) + 포지션사이징(20%)으로 대응
@@ -1578,8 +1586,10 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     vr    = float(t["Volume"]) / float(av) if float(av) > 0 else 0
     sr    = calc_support_resistance(data)
 
-    # v4.1: 24시간 거래대금 산출 (KRW 기준)
-    vol_24h = (data["Volume"].tail(24) * data["Close"].tail(24)).sum()
+    # v5.9: 24h ê±°ëëê¸ Upbit API (candle fallback)
+    vol_24h = _get_24h_trade_value(ticker)
+    if vol_24h is None:
+        vol_24h = (data["Volume"].tail(24) * data["Close"].tail(24)).sum()
 
     ts  = strategy_trend_following(data, t, y)
     ms  = strategy_mean_reversion(data, t)
@@ -1839,8 +1849,10 @@ def generate_chart(ticker, data, result):
 # 메인
 # ============================================
 def main():
+    _ver_m = __import__('re').search(r'v(\d+\.\d+)', __doc__ or '')
+    _banner_ver = _ver_m.group(0) if _ver_m else 'v5.9'
     now = utc_now()
-    print(f"{'='*60}\n🪙 Coin Alert v4.1 — Upbit KRW 자동매매 (평균회귀)")
+    print(f"{'='*60}\n🪙 Coin Alert {_banner_ver} — Upbit KRW 자동매매 (평균회귀)")
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
@@ -2112,6 +2124,14 @@ def main():
         # === 매수 ===
         if r["signal"] in ["BUY", "STRONG_BUY"]:
             name = ticker.replace("KRW-", "")
+
+            # v5.9: BTC 레짐 필터 구현 (20MA 기반 risk-off 차단)
+            if BTC_REGIME_FILTER and btc_signal is not None and len(btc_signal) > BTC_REGIME_MA_PERIOD:
+                _btc_c = float(btc_signal["Close"].iloc[-1])
+                _btc_ma = float(btc_signal["Close"].rolling(BTC_REGIME_MA_PERIOD).mean().iloc[-1])
+                if _btc_c <= _btc_ma and ticker not in portfolio:
+                    print(f"   \ud83d\udd34 {name} BTC 레짐: BTC={_btc_c/1e6:.1f}M <= {BTC_REGIME_MA_PERIOD}MA={_btc_ma/1e6:.1f}M")
+                    continue
 
             # v4.0: 포지션 수 제한 (동시 보유 MAX_CONCURRENT_POSITIONS)
             current_positions = len([k for k in portfolio if k not in ("_meta", "_sell_memory")])
