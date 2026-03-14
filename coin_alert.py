@@ -1,5 +1,11 @@
 """
-🪙 Coin Alert System v5.16 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.17 — Upbit KRW 자동매매
+
+v5.17: 분할매수 구현 — 첫 진입 60%만 매수 (2026-03-14)
+- [전략] INITIAL_BUY_RATIO 0.6 신설 (첫 매수 시 포지션의 60%만 진입)
+- [전략] DCA가 나머지 40% 자동 충당 (-3% 하락 시 잔여분 매수)
+- [목적] 평균단가 개선 → 수익률 도달 가속, 추격매수 방지
+- [안전] full_position_krw 저장 → DCA 금액 = 포지션 잔여분 자동 계산
 
 v5.16: 분할매도 활성화 — TP1 3%/TP2 7%/Trailing 5% (2026-03-14)
 - [전략] TP1 5→3% (신호매도 전 분할매도 발동, 빈번한 수익 확정)
@@ -291,7 +297,12 @@ SIGNAL_EXIT_THRESHOLD  = -10    # v4.3 신설: 매도 전용 (강한 반전 신�
                                 # 근거: 진입 후 시그널 자연 감소는 전략 작동 증거, 퇴출 사유 아님
                                 # -10 = RSI 과매수 + BB 상단 이탈 등 복합 반전 시에만 도달
 
-# v4.0: 분할매수 (평균회귀식 — 떨어지면 추가 매수)
+# v5.17: 분할매수 (첫 진입 일부 + DCA로 나머지 충당)
+INITIAL_BUY_RATIO      = 0.6     # v5.17 신설: 첫 매수 시 포지션의 60%만 진입
+                                 # 근거: 평균회귀 전략에서 첫 진입가가 최저가인 경우는 드묾
+                                 # 60% 진입 후 가격 상승 → 그대로 TP1(3%)에서 익절
+                                 # 60% 진입 후 가격 하락 → DCA로 나머지 40% 저가 매수, 평단 개선
+                                 # 대원칙3 "충분히 떨어졌을 때만 진입" — 분할로 추격 리스크 분산
 DCA_ENABLED            = True    # v4.0: 분할매수 활성화
 DCA_DROP_PCT           = 3.0     # v5.0: 2.5→3.0% (SL 4% 대비 DCA→SL 간격 확보)
                                  # 근거: SL 4%에서 DCA 2.5% = 1.5%p 간격 → 노이즈 SL 트리거
@@ -301,7 +312,8 @@ DCA_MAX_ADDS           = 1       # v4.7: 2→1회 (실전: 2회 DCA 시 총 노�
                                  # 근거: 1회 DCA = 총 150% 노출, 실질 최대 DD -7.5%로 제한
                                  # 하락 추세에서 3레이어 동시 손실 방지 (대원칙2 준수)
                                  # TREND_FILTER와 결합: 120MA 아래 시 DCA 0회(진입만)
-DCA_ADD_RATIO          = 0.5     # 초기 금액의 50% 추가 매수
+DCA_ADD_RATIO          = 0.5     # v5.17: 기존 50%는 fallback용 (full_position_krw 없는 레거시 포지션)
+                                 # 신규 포지션: full_position_krw - 현재보유금액 = 잔여분 자동 계산
 
 # v4.3 신설: 추세 필터 (하락 추세 DCA 방지)
 TREND_MA_PERIOD        = 120     # 120봉 이평선 (1시간봉 기준 5일)
@@ -723,7 +735,7 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("entry_date", "partial_taken", "dca_count"):
+                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
             if "dca_count" not in actual[t]:
@@ -803,7 +815,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "4.0"
+        meta["version"] = "5.17"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -1778,7 +1790,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v4.0</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v5.17</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1890,7 +1902,8 @@ def main():
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
-    print(f"   분할익절: +{PROFIT_TARGET_1ST}%(절반) → +{PROFIT_TARGET_2ND}%(전량) | 손절: -{LOSS_CUT_PCT}% | RSI상한: {RSI_BUY_CEILING}")
+    print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
+    print(f"   분할익절: +{PROFIT_TARGET_1ST}%(절반) → +{PROFIT_TARGET_2ND}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
     print(f"   재매수 드롭: {REBUY_DROP_PCT}% | 최대 포지션: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
@@ -2215,7 +2228,13 @@ def main():
                     and r["price"] <= pos["entry_price"] * (1 - DCA_DROP_PCT / 100)
                 )
                 if dca_ok:
-                    add_krw = r["position"]["position_krw"] * DCA_ADD_RATIO
+                    # v5.17: full_position_krw 기반 잔여분 계산 (없으면 레거시 fallback)
+                    full_krw = pos.get("full_position_krw")
+                    if full_krw:
+                        current_value = pos.get("volume", 0) * r["price"]
+                        add_krw = max(0, full_krw - current_value)
+                    else:
+                        add_krw = r["position"]["position_krw"] * DCA_ADD_RATIO
                     # v4.1: DCA 시 비중 상한 강제 (MAX_POSITION_PCT 초과 방지)
                     current_pos_value = pos.get("volume", 0) * r["price"]
                     max_pos_value = total_capital * MAX_POSITION_PCT
@@ -2236,7 +2255,7 @@ def main():
                             signal_fired = True
                             drop_pct = (r["price"] / pos["entry_price"] - 1) * 100
                             send_telegram(
-                                f"📉 <b>{name}</b> 분할매수 ({pos['dca_count']}차)\n"
+                                f"📉 <b>{name}</b> 분할매수 {pos['dca_count']+1}차 (DCA)\n"
                                 f"추가 {_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])} ({drop_pct:+.1f}%)\n"
                                 f"평균단가: {_fmt_krw(pos['entry_price'])}")
                             print(f"   📉 {name} 분할매수: +{_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])} (평단 {_fmt_krw(pos['entry_price'])})")
@@ -2277,25 +2296,30 @@ def main():
                         if has_recent_order(order_log, ticker, "BUY"):
                             print(f"   ℹ️ {name} 최근 {ORDER_COOLDOWN_MINUTES}분 내 매수 주문 — 중복 방지")
                         else:
-                            order = execute_buy(ticker, ps["position_krw"])
+                            # v5.17: 분할매수 — 첫 진입 시 INITIAL_BUY_RATIO만 매수
+                            full_krw = ps["position_krw"]
+                            buy_krw = full_krw * INITIAL_BUY_RATIO
+                            order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
                                 pending_exposure += proposed_pct
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
                                 # v3.3 fix: 매수 즉시 portfolio에 추가 (entry_date 보존)
-                                est_vol = ps["position_krw"] / r["price"]
+                                est_vol = buy_krw / r["price"]
                                 portfolio[ticker] = {
                                     "volume": est_vol,
                                     "entry_price": r["price"],
                                     "entry_date": utc_now().isoformat(),
                                     "dca_count": 0,
+                                    "full_position_krw": full_krw,  # v5.17: DCA 잔여분 계산용
                                 }
                                 portfolio_tickers.add(ticker)
+                                split_pct = INITIAL_BUY_RATIO * 100
                                 send_telegram(
-                                    f"📥 <b>{name}</b> 매수 주문 접수\n"
-                                    f"{_fmt_krw(ps['position_krw'])} ({ps['position_pct']:.0f}%)\n"
-                                    f"(체결 확인: 다음 sync)")
+                                    f"📥 <b>{name}</b> 분할매수 1차 ({split_pct:.0f}%)\n"
+                                    f"{_fmt_krw(buy_krw)} / 전체 {_fmt_krw(full_krw)} ({ps['position_pct']:.0f}%)\n"
+                                    f"(잔여 {100-split_pct:.0f}%는 DCA 대기)")
                                 chart = generate_chart(ticker, signal_data[ticker], r)
                                 if chart:
                                     send_telegram_photo(chart, f"📥 {name} BUY {_fmt_krw(r['price'])}")
