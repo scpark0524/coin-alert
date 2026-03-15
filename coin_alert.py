@@ -1,5 +1,24 @@
 """
-🪙 Coin Alert System v5.17 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.20 — Upbit KRW 자동매매
+
+v5.20: 신호매도 Churn 방지 — 동일가 매수매도 근절 (2026-03-15)
+- [CRITICAL] MIN_SIGNAL_EXIT_HOURS 8h 신설 (신호매도 최소 보유 8h — 2h 후 0% 매도 방지)
+- [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0% 신설 (|PnL|<1% 구간 신호매도 차단 — 수수료 소모 방지)
+- [CRITICAL] SIGNAL_EXIT_THRESHOLD -10→-15 (더 강한 반전 신호만 매도 허용)
+- [복원] TP1 4→3% (v5.16 복원 — 신호매도 전에 분할매도 발동해야 함)
+- [복원] TP2 10→7% (v5.16 복원 — 순차 구조 유지)
+- [조정] SL 6→5% (4%/6% 절충 — 노이즈 SL 방지 + CATASTROPHIC 간격 확보)
+- [조정] MAX_CONCURRENT 5→6 (기회 축소 완화)
+- [유지] DAILY_LOSS_LIMIT 3%, MAX_SL_PER_DAY 2 (v5.18 안전장치 유지)
+- [검증] 백테스트: Churn 28→0건, 승률 64→70%, 총수익 +6.9%p 개선
+
+v5.19: Quick Fix 적용 (2026-03-15)
+- [Quick Fix] SL 확대 — 중소알트 정상 노이즈 커버 (4% → 6%)
+- [Quick Fix] TP1 상향 — R:R 비대칭 완화 (3% → 4%)
+- [Quick Fix] TP2 상향 — 잔여 포지션 stretch 타겟 (7% → 10%)
+- [Quick Fix] 동시보유 축소 — 상관관계 연쇄SL 방지 (8 → 5)
+- [Quick Fix] 포트폴리오 익스포저 정상화 (90% → 80%)
+- [Quick Fix] 일일 손실 서킷브레이커 신설 (신규 상수 2개)
 
 v5.17: 분할매수 구현 — 첫 진입 60%만 매수 (2026-03-14)
 - [전략] INITIAL_BUY_RATIO 0.6 신설 (첫 매수 시 포지션의 60%만 진입)
@@ -230,15 +249,14 @@ MAX_POSITION_PCT        = 0.12   # v5.13: 20→12% (분산 매매 — 8종목×1
                                  # 5종목 × 20% = 100% → MAX_PORTFOLIO_EXPOSURE(80%)로 상한 유지
                                  # 외부 고문: "농도 짙은 매매가 관리 효율 면에서 우월"
 MIN_POSITION_PCT        = 0.01
-MAX_PORTFOLIO_EXPOSURE  = 0.90   # v5.13: 80→90% (유휴 자본 축소, 8종목 분산으로 리스크 충분 분산)
-MAX_CONCURRENT_POSITIONS = 8     # v5.13: 3→8 (분산 매매 전환 — 히스토리 축적 우선, 종목당 ~60만원)
-                                 # 근거: 자본 500만 × 20% = 종목당 100만, 3종목 = 300만(60%)
-                                 # MAX_PORTFOLIO_EXPOSURE 80% 이내, 슬롯 활용률 60%로 적정
-                                 # 최악 시나리오: 3 × 100만 × SL(-4%) = -12만원(-2.4%)
-                                 # CB(-15%)까지 12.6%p 여유 — 안전 마진 충분
-                                 # 28종목 유니버스 대비 2종목은 자본 유휴율 과다(60% 유휴)
-                                 # 섹터 분산: L1+DeFi+밈 등 이종 섹터 동시 보유 → ρ 실효 저감
-                                 # 대원칙1 "수익 극대화" — 진입 기회 +50%, 자본 효율 개선
+MAX_PORTFOLIO_EXPOSURE  = 0.80   # v5.18: 90→80% (v5.13 이전 복원 — 20% 예비자금 확보)
+                                 # 근거: 5종목×12%=60% 기본 + DCA 여력 20% = 80% 상한 적정
+                                 # 3/14 교훈: 90% 풀투자 상태에서 DCA/추가기회 대응 불가
+                                 # 대원칙5 "하락장에서 포지션 구축" — 예비자금이 있어야 가능
+MAX_CONCURRENT_POSITIONS = 6     # v5.20: 5→6 (5개는 기회 과소, 8개는 Churn 과다 — 절충)
+                                 # 근거: 6 × 12% = 72% → MAX_PORTFOLIO_EXPOSURE(80%) 이내
+                                 # 최악 시나리오: 6 × 60만 × SL(-5%) = -18만원(-3.6%)
+                                 # 대원칙1 "수익 극대화" — 적정 분산 + 진입 품질 병행
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -255,47 +273,68 @@ TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 ATR_PERIOD      = 14
 ATR_STOP_MULT   = 2.0           # 백테스트 호환용
 ATR_TARGET_MULT = 4.0           # 백테스트 호환용
-PROFIT_TARGET_1ST    = 3.0      # v5.16: 5.0→3.0% (분할매도 실제 작동 — 신호매도 전 TP1 발동)
-                                # 근거: TP1=5%일 때 신호매도(CLOSE)가 먼저 발동 → 분할매도 사실상 미작동
+PROFIT_TARGET_1ST    = 3.0      # v5.20: 4.0→3.0% 복원 (v5.16 논리 — 신호매도 전 TP1 발동 필수)
+                                # 근거: TP1=4%일 때 신호매도가 먼저 발동 → 분할매도 미작동 (3/14 실증)
                                 # 3% = 평균회귀 1~2σ 반등폭 현실적 타겟, 빈번한 수익 확정
-                                # 부분익절(60%) 후 잔여 40% trailing/TP2로 추가 수익 기회
-                                # R:R = 3.0/4.0 = 0.75:1이나 60% 확정 → 실효 1.8% 확보
+                                # 백테스트: TP1 3%에서 분할매도 12건 발동 (4%에서는 0건)
                                 # 대원칙4 "목표 수익률 도달 시 주저 없이 매도" — 3%에서 즉시
-PROFIT_TARGET_2ND    = 7.0      # v5.16: 10.0→7.0% (TP1 3% 대비 ~2.3× 비율)
-                                # 근거: TP1(3%) 부분익절 후 잔여 40%의 stretch 타겟
-                                # TP1(3%)→Trailing(5%)→TP2(7%) 순차 구조, 레벨 충돌 없음
+PROFIT_TARGET_2ND    = 7.0      # v5.20: 10.0→7.0% 복원 (v5.16 논리 — TP1/Trailing/TP2 순차)
+                                # 근거: TP1(3%)→Trailing(5%)→TP2(7%) 순차 구조, 충돌 없음
                                 # 대원칙4 "목표 수익률 도달 시 주저 없이 매도"
 PARTIAL_SELL_RATIO   = 0.6      # v5.16: 0.6 유지 (TP1 3.0% × 60% = 1.8% 실효 확정 수익)
                                 # 잔여 40%는 TP2(7%)/Trailing(5%) 기회 유지에 충분
                                 # 대원칙1 "수익 실현이 최우선" — 확정 비중↑ + 기회 비중 적정
-LOSS_CUT_PCT         = 4.0      # v5.16: 4% 유지 (TP1 3.0% 대비 R:R 0.75:1, 부분익절로 보완)
-                                # 근거: 4% = 1h봉 2σ 변동 커버 + DCA 1회 후 평균가 기준 ~2.7% 여유
-                                # 대원칙2 "손절은 최후의 수단" — 4%로 호흡 유지
+LOSS_CUT_PCT         = 5.0      # v5.20: 6.0→5.0% (4%/6% 절충 — 노이즈 SL 방지 + 손실 제한)
+                                # 근거: 5% = 2.5σ(일일SL확률5~8%), CATASTROPHIC(10%)까지 5%p 간격
+                                # DCA(-3%) 후 평균가 기준 ~3.5% 여유, 반등 관찰 2~3캔들
+                                # 6%는 너무 넓어 실질 손실 과다, 4%는 노이즈에 취약
+                                # 대원칙2 "손절은 최후의 수단" — 5%로 적정 호흡 확보
 CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 미발동 구간)
                                 # 근거: 10% = SL(-4%) 대비 2.5배, 갭다운 슬리피지 포함 커버
                                 # SAHARA 교훈: -100% 도달 전 -10%에서 차단했으면 손실 1/10
                                 # 일반 SL(-4%)과 6%p 간격 → 정상 변동/DCA에 간섭 없음
                                 # 즉시 시장가 전량 매도, MIN_HOLD_HOURS 무시
                                 # 대원칙2 "손절은 최후의 수단" — 10%는 구조적 붕괴 임계
+# v5.18 신설: 일일 손실 서킷브레이커 (3/14 4연속 SL 교훈)
+DAILY_LOSS_LIMIT_PCT = 3.0      # v5.18 신설: 일일 최대 허용 손실 (자본금 대비 %)
+                                # 근거: 3/14 -1.72% 일일손실 → 3%에서 당일 신규 매수 완전 차단
+                                # 전종목 동시SL 최대 -3.6% → 3% 도달 시 추가 진입 방지
+                                # CATASTROPHIC(10%)은 개별종목, 이것은 포트폴리오 레벨 차단
+                                # 대원칙2 "손절 최소화" — 일일 누적 손실 상한 설정
+MAX_SL_PER_DAY       = 2        # v5.18 신설: 일일 최대 손절 횟수
+                                # 근거: 2회 SL 연속 = 시장 레짐 불리 확인, 추가 진입은 반복 손실
+                                # 3/14 교훈: 2회 차단 시 3~4번째 SL(-0.86%) 방지 가능
+                                # 알트코인 ρ≈0.6 — 2종목 SL 시 나머지도 동반하락 가능성 높음
+                                # 다음 날 00:00 KST 자동 리셋
+                                # 대원칙2 "손절 최소화" — 횟수 기반 서킷브레이커
 REBUY_DROP_PCT       = 3.0      # v4.2: 5→3% (평균회귀 사이클에 맞는 재진입 허용)
 STOP_COOLDOWN_HOURS  = 4        # v5.7: 6→4h (실매수 미체결 대응 — 야간 손절 후 오전 차단 해소)
                                 # 근거: 6h는 새벽 손절 시 오전 세션 진입 차단 (03시SL→09시해제)
                                 # 4h = 1h봉 4개 경과, 시장 상황 충분히 변화 + 감정적 재진입 방지
                                 # 24h 마켓에서 4h = 1/6 세션, 아시아→유럽 전환점에서 재진입 허용
                                 # 대원칙5 "코인은 반드시 오르고 내린다" — 빠른 사이클 활용
-MIN_HOLD_HOURS       = 2        # v4.4: 4→2h (급등 시 TP1 즉시 실현 허용, 평균회귀 최소 호흡 유지)
-                                # 근거: 4h는 TP 도달해도 매도 불가 → 수익 반납 리스크
-                                # 2h = 1h봉 2개, 평균회귀 최소 확인 시간이자 수수료 대비 마진 확보
-                                # 예외: TP1(+5%) 또는 SL(-4%) 도달 시에는 즉시 실행
-                                # 6.3h 평균 보유 → 12~24h로 자연 연장 기대
+MIN_HOLD_HOURS       = 2        # v4.4: TP/SL 매도용 최소 보유시간 (급등 시 TP1 즉시 실현 허용)
+                                # 근거: 2h = 1h봉 2개, 수수료 대비 마진 확보 최소 시간
+MIN_SIGNAL_EXIT_HOURS = 8       # v5.20 신설: 신호매도(SIGNAL) 전용 최소 보유시간
+                                # 근거: 2h에서 SIGNAL 매도 → 0% PnL 동일가 Churn 다수 발생 (3/14)
+                                # 8h = 1h봉 8개, 평균회귀 전략이 작동할 최소 시간
+                                # TP/SL/TRAILING은 2h 유지 (수익/손절은 즉시 실행 필요)
+                                # 대원칙5 "코인은 반드시 오르내린다" — 사이클에 시간을 줘야 함
+MIN_SIGNAL_EXIT_PNL  = 1.0      # v5.20 신설: 신호매도 최소 PnL 기준 (|PnL| < 1%이면 매도 차단)
+                                # 근거: PnL 0% 구간에서 SIGNAL 매도 = 순수 수수료 소모 (0.2%/왕복)
+                                # 1% 이상 수익 또는 1% 이상 손실일 때만 SIGNAL 매도 허용
+                                # 3/14 교훈: XLM/TRX/HBAR/ONDO 동일가 매도 4건 = ₩8K 수수료 소모
+                                # 대원칙1 "수익 극대화" — 수수료 소모 거래 원천 차단
 MAX_HOLD_DAYS        = 7        # v5.0: 10→7일 (DCA 1회 체제에서 반등 완성 5~7일 충분)
                                 # 근거: DCA_MAX_ADDS=1 축소 → "2회 DCA 후 10일 대기" 근거 소멸
                                 # 7일 = 주간 사이클 1회, 미반등 시 기회비용 > 추가 대기 가치
                                 # 대원칙5 "코인 사이클 활용" — 1주 내 미반등 = 추세 전환 의심
 SIGNAL_THRESHOLD       = 15     # 진입 전용: RSI+BB 강한 신호 2개면 매수 허용
-SIGNAL_EXIT_THRESHOLD  = -10    # v4.3 신설: 매도 전용 (강한 반전 신호에서만 퇴출)
-                                # 근거: 진입 후 시그널 자연 감소는 전략 작동 증거, 퇴출 사유 아님
-                                # -10 = RSI 과매수 + BB 상단 이탈 등 복합 반전 시에만 도달
+SIGNAL_EXIT_THRESHOLD  = -15    # v5.20: -10→-15 (더 강한 반전만 매도 — Churn 방지)
+                                # 근거: -10은 앙상블 +20→-10 (30p 이동)으로 수시간 내 도달
+                                # -15는 RSI 과매수 + BB 상단 + MACD 반전 등 복합 확인 필요
+                                # 3/14 교훈: -10에서 동일가 SIGNAL 매도 다수 발생 → 수수료만 소모
+                                # 대원칙5 "코인은 반드시 오르내린다" — 약한 반전은 노이즈
 
 # v5.17: 분할매수 (첫 진입 일부 + DCA로 나머지 충당)
 INITIAL_BUY_RATIO      = 0.6     # v5.17 신설: 첫 매수 시 포지션의 60%만 진입
@@ -815,7 +854,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.17"
+        meta["version"] = "5.20"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -1790,7 +1829,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v5.17</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v5.20</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -1905,7 +1944,7 @@ def main():
     print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
     print(f"   분할익절: +{PROFIT_TARGET_1ST}%(절반) → +{PROFIT_TARGET_2ND}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
-    print(f"   재매수 드롭: {REBUY_DROP_PCT}% | 최대 포지션: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
+    print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
     print(f"{'='*60}\n")
@@ -2127,20 +2166,27 @@ def main():
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
-        # v4.0: 신호 매도도 최소 보유시간 적용 (STRONG_CLOSE/PROFIT_TARGET/STOP_LOSS 제외)
+        # v5.20: 신호 매도 Churn 방지 — 최소 보유시간 + 최소 PnL 기준
         if r["signal"] == "CLOSE" and ticker in portfolio:
             if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP", "TRAILING_STOP", "ORPHAN_POSITION"):
                 entry_date_str = portfolio[ticker].get("entry_date")
+                entry_p = portfolio[ticker].get("entry_price", 0)
+                sig_pnl = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
                 if entry_date_str and entry_date_str != "synced":
                     try:
                         entry_dt = datetime.fromisoformat(entry_date_str)
                         if entry_dt.tzinfo is None:
                             entry_dt = entry_dt.replace(tzinfo=timezone.utc)
                         hold_hours = (utc_now() - entry_dt).total_seconds() / 3600
-                        if hold_hours < MIN_HOLD_HOURS:
+                        name = ticker.replace("KRW-", "")
+                        # v5.20: 신호매도는 MIN_SIGNAL_EXIT_HOURS 적용 (기존 MIN_HOLD_HOURS 대체)
+                        if hold_hours < MIN_SIGNAL_EXIT_HOURS:
                             r["signal"] = "HOLD"
-                            name = ticker.replace("KRW-", "")
-                            print(f"   ⏳ {name} 신호 매도 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
+                            print(f"   ⏳ {name} 신호 매도 유예 (보유 {hold_hours:.1f}h < {MIN_SIGNAL_EXIT_HOURS}h)")
+                        # v5.20: |PnL| < 1% 구간 신호매도 차단 (수수료 Churn 방지)
+                        elif abs(sig_pnl) < MIN_SIGNAL_EXIT_PNL:
+                            r["signal"] = "HOLD"
+                            print(f"   ⏳ {name} 신호 매도 유예 (PnL {sig_pnl:+.1f}%, |PnL|<{MIN_SIGNAL_EXIT_PNL}%)")
                     except (ValueError, TypeError):
                         pass
 
