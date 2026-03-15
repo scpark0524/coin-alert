@@ -1,9 +1,12 @@
 """
 🪙 Coin Alert System v5.20 — Upbit KRW 자동매매
 
-v5.20.1: 손실 구간 신호매도 완전 차단 (2026-03-15)
+v5.20.1: 손실 구간 신호매도 차단 + 3단계 분할익절 (2026-03-15)
 - [CRITICAL] 신호매도는 이익(PnL≥+1%) 시에만 허용 — 손실 시 SL/TIME_STOP이 전담
 - [FIX] ETC -2.8% SIGNAL 매도 방지 (대원칙2 "손절은 최후의 수단" 위배)
+- [전략] 3단계 분할익절: TP1 +3%(40%) → TP2 +7%(30%) → TP3 +10%(전량)
+- [전략] MAX_CONCURRENT 6→8 복원 (Churn 근절 후 히스토리 축적 목적)
+- [전략] MAX_PORTFOLIO_EXPOSURE 80→85% (자본 효율 + DCA 여력 균형)
 
 v5.20: 신호매도 Churn 방지 — 동일가 매수매도 근절 (2026-03-15)
 - [CRITICAL] MIN_SIGNAL_EXIT_HOURS 8h 신설 (신호매도 최소 보유 8h — 2h 후 0% 매도 방지)
@@ -280,17 +283,21 @@ TOTAL_COST_BPS      = COMMISSION_BPS + SLIPPAGE_BPS
 ATR_PERIOD      = 14
 ATR_STOP_MULT   = 2.0           # 백테스트 호환용
 ATR_TARGET_MULT = 4.0           # 백테스트 호환용
-PROFIT_TARGET_1ST    = 3.0      # v5.20: 4.0→3.0% 복원 (v5.16 논리 — 신호매도 전 TP1 발동 필수)
-                                # 근거: TP1=4%일 때 신호매도가 먼저 발동 → 분할매도 미작동 (3/14 실증)
-                                # 3% = 평균회귀 1~2σ 반등폭 현실적 타겟, 빈번한 수익 확정
-                                # 백테스트: TP1 3%에서 분할매도 12건 발동 (4%에서는 0건)
+PROFIT_TARGET_1ST    = 3.0      # v5.20: TP1 — 빈번한 수익 확정 (평균회귀 1~2σ 반등폭)
                                 # 대원칙4 "목표 수익률 도달 시 주저 없이 매도" — 3%에서 즉시
-PROFIT_TARGET_2ND    = 7.0      # v5.20: 10.0→7.0% 복원 (v5.16 논리 — TP1/Trailing/TP2 순차)
-                                # 근거: TP1(3%)→Trailing(5%)→TP2(7%) 순차 구조, 충돌 없음
-                                # 대원칙4 "목표 수익률 도달 시 주저 없이 매도"
-PARTIAL_SELL_RATIO   = 0.6      # v5.16: 0.6 유지 (TP1 3.0% × 60% = 1.8% 실효 확정 수익)
-                                # 잔여 40%는 TP2(7%)/Trailing(5%) 기회 유지에 충분
-                                # 대원칙1 "수익 실현이 최우선" — 확정 비중↑ + 기회 비중 적정
+PROFIT_TARGET_2ND    = 7.0      # v5.20: TP2 — 중간 익절 (추세 지속 시 추가 확정)
+                                # TP1(3%)→Trailing(5%)→TP2(7%) 순차 구조
+PROFIT_TARGET_3RD    = 10.0     # v5.20.1 신설: TP3 — stretch 타겟 (강한 추세 시 최종 확정)
+                                # TP2(7%)→TP3(10%) 3%p 간격, 충돌 없음
+                                # 대원칙1 "수익 극대화" — 잔여 30%가 +10%까지 추가 기회 확보
+PARTIAL_SELL_RATIO_1 = 0.4      # v5.20.1: TP1에서 40% 매도 (기존 60% → 40%로 축소)
+                                # 근거: 3단계 분할매도 → 각 단계 비중 분산
+                                # TP1(40%) + TP2(30%) + TP3(30%) = 100%
+                                # 대원칙4 "올랐을 때 확실히 익절" — 3%에서 40% 즉시 확정
+PARTIAL_SELL_RATIO_2 = 0.5      # v5.20.1 신설: TP2에서 잔여의 50% 매도 (전체 기준 30%)
+                                # TP1 후 잔여 60% × 50% = 30% 매도
+                                # TP3용 잔여 30% 유지
+                                # 대원칙1 "수익 실현이 최우선" — 단계별 확정 비중 분산
 LOSS_CUT_PCT         = 5.0      # v5.20: 6.0→5.0% (4%/6% 절충 — 노이즈 SL 방지 + 손실 제한)
                                 # 근거: 5% = 2.5σ(일일SL확률5~8%), CATASTROPHIC(10%)까지 5%p 간격
                                 # DCA(-3%) 후 평균가 기준 ~3.5% 여유, 반등 관찰 2~3캔들
@@ -783,7 +790,7 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw"):
+                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
             if "dca_count" not in actual[t]:
@@ -1478,22 +1485,30 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
         if pos is None:
             if total >= current_threshold:
                 entry_price = next_open * (1 + cost_pct)
-                pos = {"entry": entry_price, "idx": i + 1, "partial": False}
+                pos = {"entry": entry_price, "idx": i + 1, "partial": False, "tp_level": 0}
         else:
             hold_days = i - pos["idx"]
             cp = float(t_bar["Close"])
             pnl_pct = (cp / pos["entry"] - 1) * 100
 
-            # v4.0: 분할 익절 반영 (1차 +4% 절반, 2차 +8% 전량)
-            # 백테스트에서는 1차 익절의 수익을 절반 PnL로 기록하고 계속 보유
-            if pnl_pct >= PROFIT_TARGET_1ST and not pos["partial"]:
-                partial_pnl = pnl_pct * PARTIAL_SELL_RATIO  # 절반의 수익
-                trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL", "entry_idx": pos["idx"]})
+            # v5.20.1: 3단계 분할 익절 반영
+            tp_level = pos.get("tp_level", 0)
+            # TP1: 40% 매도
+            if pnl_pct >= PROFIT_TARGET_1ST and tp_level < 1:
+                partial_pnl = pnl_pct * PARTIAL_SELL_RATIO_1
+                trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL_TP1", "entry_idx": pos["idx"]})
                 pos["partial"] = True
+                pos["tp_level"] = 1
+            # TP2: 잔여의 50% 매도 (전체 30%)
+            if pnl_pct >= PROFIT_TARGET_2ND and tp_level == 1:
+                remaining = 1 - PARTIAL_SELL_RATIO_1  # 60%
+                partial_pnl = pnl_pct * remaining * PARTIAL_SELL_RATIO_2
+                trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL_TP2", "entry_idx": pos["idx"]})
+                pos["tp_level"] = 2
 
             exit_reason = None
             exit_price  = None
-            if pnl_pct >= PROFIT_TARGET_2ND:
+            if pnl_pct >= PROFIT_TARGET_3RD:
                 exit_reason = "PROFIT_TARGET"
                 exit_price  = cp * (1 - cost_pct)
             elif pnl_pct <= -LOSS_CUT_PCT:
@@ -1508,8 +1523,14 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
 
             if exit_reason:
                 pnl = (exit_price / pos["entry"] - 1) * 100
-                # 1차 익절 했으면 나머지 절반만 기록
-                remaining_ratio = (1 - PARTIAL_SELL_RATIO) if pos["partial"] else 1.0
+                # 분할 익절 단계에 따라 잔여 비율 계산
+                tp_lvl = pos.get("tp_level", 0)
+                if tp_lvl >= 2:
+                    remaining_ratio = (1 - PARTIAL_SELL_RATIO_1) * (1 - PARTIAL_SELL_RATIO_2)  # 30%
+                elif tp_lvl >= 1:
+                    remaining_ratio = 1 - PARTIAL_SELL_RATIO_1  # 60%
+                else:
+                    remaining_ratio = 1.0
                 trades.append({"pnl": pnl * remaining_ratio, "days": hold_days, "reason": exit_reason, "entry_idx": pos["idx"]})
                 pos = None
 
@@ -1951,7 +1972,7 @@ def main():
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
     print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
-    print(f"   분할익절: +{PROFIT_TARGET_1ST}%(절반) → +{PROFIT_TARGET_2ND}%(전량) | RSI상한: {RSI_BUY_CEILING}")
+    print(f"   분할익절: TP1 +{PROFIT_TARGET_1ST}%({PARTIAL_SELL_RATIO_1*100:.0f}%) → TP2 +{PROFIT_TARGET_2ND}%({PARTIAL_SELL_RATIO_2*100:.0f}%) → TP3 +{PROFIT_TARGET_3RD}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
     print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
@@ -2120,33 +2141,59 @@ def main():
                 except (ValueError, TypeError):
                     pass
 
-            # v4.0: 분할 익절 — 1차 +4%에서 절반 매도
-            if pnl_pct >= PROFIT_TARGET_1ST and not pos.get("partial_taken"):
+            # v5.20.1: 3단계 분할 익절 — TP1(3%) 40% → TP2(7%) 30% → TP3(10%) 전량
+            tp_level = pos.get("tp_level", 0)  # 0=미익절, 1=TP1완료, 2=TP2완료
+
+            # TP1: +3%에서 40% 매도
+            if pnl_pct >= PROFIT_TARGET_1ST and tp_level < 1:
                 vol = pos.get("volume", 0)
-                sell_vol = vol * PARTIAL_SELL_RATIO
+                sell_vol = vol * PARTIAL_SELL_RATIO_1
                 if can_trade and sell_vol > 0:
                     order = execute_sell(ticker, sell_vol)
                     if order:
                         record_order(order_log, ticker, "SELL")
-                        pos["partial_taken"] = True
+                        pos["tp_level"] = 1
+                        pos["partial_taken"] = True  # 하위 호환
                         pos["volume"] = vol - sell_vol
                         signal_fired = True
                         sold_value = sell_vol * r["price"]
                         total_exposure = max(0, total_exposure - sold_value / total_capital)
                         capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                         send_telegram(
-                            f"💰 <b>{name}</b> 1차 익절 ({PARTIAL_SELL_RATIO*100:.0f}%)\n"
+                            f"💰 <b>{name}</b> TP1 익절 ({PARTIAL_SELL_RATIO_1*100:.0f}%)\n"
                             f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                             f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
-                        print(f"   💰 {name} 1차 익절: {pnl_pct:+.1f}% (절반 매도)")
+                        print(f"   💰 {name} TP1 익절: {pnl_pct:+.1f}% (40% 매도)")
                 elif not can_trade:
-                    print(f"   💰 {name} 1차 익절 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
+                    print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
 
-            # v4.0: 2차 익절 — +8%에서 나머지 전량 매도
-            if pnl_pct >= PROFIT_TARGET_2ND:
+            # TP2: +7%에서 잔여의 50% 매도 (전체 기준 30%)
+            if pnl_pct >= PROFIT_TARGET_2ND and tp_level == 1:
+                vol = pos.get("volume", 0)
+                sell_vol = vol * PARTIAL_SELL_RATIO_2
+                if can_trade and sell_vol > 0:
+                    order = execute_sell(ticker, sell_vol)
+                    if order:
+                        record_order(order_log, ticker, "SELL")
+                        pos["tp_level"] = 2
+                        pos["volume"] = vol - sell_vol
+                        signal_fired = True
+                        sold_value = sell_vol * r["price"]
+                        total_exposure = max(0, total_exposure - sold_value / total_capital)
+                        capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
+                        send_telegram(
+                            f"💰 <b>{name}</b> TP2 익절 (잔여의 {PARTIAL_SELL_RATIO_2*100:.0f}%)\n"
+                            f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
+                            f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
+                        print(f"   💰 {name} TP2 익절: {pnl_pct:+.1f}% (잔여 50% 매도)")
+                elif not can_trade:
+                    print(f"   💰 {name} TP2 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
+
+            # TP3: +10%에서 전량 매도
+            if pnl_pct >= PROFIT_TARGET_3RD:
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "PROFIT_TARGET"
-                print(f"   🎯 {name} 2차 익절: {pnl_pct:+.1f}% ≥ {PROFIT_TARGET_2ND}%")
+                print(f"   🎯 {name} TP3 익절: {pnl_pct:+.1f}% ≥ {PROFIT_TARGET_3RD}%")
 
             # v4.0: 고정 손절 → 최소 보유시간 이후에만
             elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
