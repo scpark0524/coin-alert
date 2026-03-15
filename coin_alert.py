@@ -1730,6 +1730,34 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     if es > 0 and rsi > RSI_BUY_CEILING:
         es = min(es, -5)  # 매수 불가 영역으로 강제 이동
 
+    # v5.20.1: 매수 진입 스코어링 gate (대원칙3 "충분히 떨어졌을 때만 진입")
+    entry_score = 0
+    if es > 0:  # 매수 신호일 때만 스코어링
+        # RSI 과매도 가산 (최대 3점)
+        if rsi <= RSI_OVERSOLD:         entry_score += 3  # RSI ≤ 35: 명확한 과매도
+        elif rsi <= RSI_OVERSOLD + 10:  entry_score += 1  # RSI ≤ 45: 약한 과매도
+        # BB 하단 근접 가산 (최대 2점)
+        bb_lower = float(t["BB_Lower"]) if pd.notna(t.get("BB_Lower")) else cp
+        if cp <= bb_lower:              entry_score += 2  # BB 하단 이탈
+        elif cp <= bb_lower * 1.01:     entry_score += 1  # BB 하단 1% 이내
+        # ADX 약추세 가산 (1점) — 평균회귀에 유리
+        if adx < 25:                    entry_score += 1
+        # 지지선 근접 가산 (1점)
+        if sr.get("near_support"):      entry_score += 1
+        # 거래량 급증 가산 (1점)
+        if vr >= 1.5:                   entry_score += 1
+        # 24h 가격위치 감점 (대원칙3 "추격매수 절대 금지")
+        h24 = data["High"].tail(24).max()
+        l24 = data["Low"].tail(24).min()
+        if h24 > l24:
+            percentile = (cp - l24) / (h24 - l24) * 100
+            if percentile >= PRICE_PERCENTILE_BLOCK:
+                entry_score -= PRICE_PERCENTILE_PENALTY  # 고점 구간 -3점
+
+        # 스코어 미달 시 매수 차단
+        if entry_score < MIN_ENTRY_SCORE:
+            es = min(es, threshold - 1)  # 임계값 미만으로 강제 이동 → HOLD
+
     threshold = get_regime_threshold(regime_info["regime"])
 
     if es >= 50:         sig = "STRONG_BUY"
@@ -1802,7 +1830,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
         "support": sr["support"], "resistance": sr["resistance"],
         "near_support": sr["near_support"], "near_resistance": sr["near_resistance"],
         "trend_score": ts, "mean_rev_score": ms, "breakout_score": bks, "momentum_pred_score": mps,
-        "ensemble_score": es, "confidence": conf, "vwap": vwap,
+        "ensemble_score": es, "confidence": conf, "entry_score": entry_score, "vwap": vwap,
         "backtest": bt, "weekly": wk, "position": ps,
         "volume_24h": vol_24h,
     }
@@ -2052,7 +2080,7 @@ def main():
         results.append(r)
         name = ticker.replace("KRW-", "")
         print(f"   {name}: {r['signal']} (앙상블:{r['ensemble_score']:+.1f} 신뢰:{r['confidence']}/100 "
-              f"RSI:{r['rsi']:.0f} ADX:{r['adx']:.0f} 모멘텀:{r.get('momentum_pred_score', 0):+.0f})")
+              f"RSI:{r['rsi']:.0f} ADX:{r['adx']:.0f} 진입:{r.get('entry_score', 0)}점 모멘텀:{r.get('momentum_pred_score', 0):+.0f})")
         print(f"      손절:{_fmt_krw(r['stop_loss'])} 익절:{_fmt_krw(r['take_profit'])} "
               f"Sharpe:{r['backtest']['sharpe']:.1f}")
 
