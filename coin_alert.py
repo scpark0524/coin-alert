@@ -1,9 +1,13 @@
 """
 🪙 Coin Alert System v5.20 — Upbit KRW 자동매매
 
+v5.20.1: 손실 구간 신호매도 완전 차단 (2026-03-15)
+- [CRITICAL] 신호매도는 이익(PnL≥+1%) 시에만 허용 — 손실 시 SL/TIME_STOP이 전담
+- [FIX] ETC -2.8% SIGNAL 매도 방지 (대원칙2 "손절은 최후의 수단" 위배)
+
 v5.20: 신호매도 Churn 방지 — 동일가 매수매도 근절 (2026-03-15)
 - [CRITICAL] MIN_SIGNAL_EXIT_HOURS 8h 신설 (신호매도 최소 보유 8h — 2h 후 0% 매도 방지)
-- [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0% 신설 (|PnL|<1% 구간 신호매도 차단 — 수수료 소모 방지)
+- [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0% 신설 (PnL<+1% 신호매도 차단 — 수수료 소모 방지)
 - [CRITICAL] SIGNAL_EXIT_THRESHOLD -10→-15 (더 강한 반전 신호만 매도 허용)
 - [복원] TP1 4→3% (v5.16 복원 — 신호매도 전에 분할매도 발동해야 함)
 - [복원] TP2 10→7% (v5.16 복원 — 순차 구조 유지)
@@ -320,11 +324,13 @@ MIN_SIGNAL_EXIT_HOURS = 8       # v5.20 신설: 신호매도(SIGNAL) 전용 최�
                                 # 8h = 1h봉 8개, 평균회귀 전략이 작동할 최소 시간
                                 # TP/SL/TRAILING은 2h 유지 (수익/손절은 즉시 실행 필요)
                                 # 대원칙5 "코인은 반드시 오르내린다" — 사이클에 시간을 줘야 함
-MIN_SIGNAL_EXIT_PNL  = 1.0      # v5.20 신설: 신호매도 최소 PnL 기준 (|PnL| < 1%이면 매도 차단)
-                                # 근거: PnL 0% 구간에서 SIGNAL 매도 = 순수 수수료 소모 (0.2%/왕복)
-                                # 1% 이상 수익 또는 1% 이상 손실일 때만 SIGNAL 매도 허용
-                                # 3/14 교훈: XLM/TRX/HBAR/ONDO 동일가 매도 4건 = ₩8K 수수료 소모
-                                # 대원칙1 "수익 극대화" — 수수료 소모 거래 원천 차단
+MIN_SIGNAL_EXIT_PNL  = 1.0      # v5.20: 신호매도 최소 수익 기준 (PnL < +1%이면 신호매도 차단)
+                                # v5.20.1: 손실 구간 신호매도 완전 차단 (PnL < 0 → SL이 담당)
+                                # 근거: -2.8%에서 SIGNAL 매도 발생 (3/15 ETC) → SL(-5%) 전 조기 퇴장
+                                # 대원칙2 "손절은 최후의 수단, 반등 기회를 기다리라" 위배
+                                # 신호매도 = 이익 실현 도구 (PnL ≥ +1% 시만 허용)
+                                # 손실 퇴장 = SL(-5%) / CATASTROPHIC(-10%) / TIME_STOP(7일)이 전담
+                                # 대원칙1+2 "이익일 때 팔고, 손실은 SL까지 기다리라"
 MAX_HOLD_DAYS        = 7        # v5.0: 10→7일 (DCA 1회 체제에서 반등 완성 5~7일 충분)
                                 # 근거: DCA_MAX_ADDS=1 축소 → "2회 DCA 후 10일 대기" 근거 소멸
                                 # 7일 = 주간 사이클 1회, 미반등 시 기회비용 > 추가 대기 가치
@@ -2183,10 +2189,14 @@ def main():
                         if hold_hours < MIN_SIGNAL_EXIT_HOURS:
                             r["signal"] = "HOLD"
                             print(f"   ⏳ {name} 신호 매도 유예 (보유 {hold_hours:.1f}h < {MIN_SIGNAL_EXIT_HOURS}h)")
-                        # v5.20: |PnL| < 1% 구간 신호매도 차단 (수수료 Churn 방지)
-                        elif abs(sig_pnl) < MIN_SIGNAL_EXIT_PNL:
+                        # v5.20.1: 손실 구간 신호매도 완전 차단 (손절은 SL이 전담)
+                        elif sig_pnl < 0:
                             r["signal"] = "HOLD"
-                            print(f"   ⏳ {name} 신호 매도 유예 (PnL {sig_pnl:+.1f}%, |PnL|<{MIN_SIGNAL_EXIT_PNL}%)")
+                            print(f"   ⏳ {name} 신호 매도 유예 (손실 {sig_pnl:+.1f}% — SL(-{LOSS_CUT_PCT}%)까지 대기)")
+                        # v5.20: 이익 구간에서도 +1% 미만이면 매도 차단 (수수료 Churn 방지)
+                        elif sig_pnl < MIN_SIGNAL_EXIT_PNL:
+                            r["signal"] = "HOLD"
+                            print(f"   ⏳ {name} 신호 매도 유예 (PnL {sig_pnl:+.1f}% < +{MIN_SIGNAL_EXIT_PNL}%)")
                     except (ValueError, TypeError):
                         pass
 
