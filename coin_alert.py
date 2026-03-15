@@ -4,7 +4,7 @@
 v5.20.1: 손실 구간 신호매도 차단 + 3단계 분할익절 (2026-03-15)
 - [CRITICAL] 신호매도는 이익(PnL≥+1%) 시에만 허용 — 손실 시 SL/TIME_STOP이 전담
 - [FIX] ETC -2.8% SIGNAL 매도 방지 (대원칙2 "손절은 최후의 수단" 위배)
-- [전략] 3단계 분할익절: TP1 +3%(40%) → TP2 +7%(30%) → TP3 +10%(전량)
+- [전략] 3단계 분할익절: TP1 +3%(50%) → TP2 +7%(30%) → TP3 +10%(전량)
 - [전략] MAX_CONCURRENT 6→8 복원 (Churn 근절 후 히스토리 축적 목적)
 - [전략] MAX_PORTFOLIO_EXPOSURE 80→85% (자본 효율 + DCA 여력 균형)
 
@@ -791,7 +791,7 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level"):
+                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
             if "dca_count" not in actual[t]:
@@ -1494,13 +1494,13 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
 
             # v5.20.1: 3단계 분할 익절 반영
             tp_level = pos.get("tp_level", 0)
-            # TP1: 40% 매도
+            # TP1: 50% 매도
             if pnl_pct >= PROFIT_TARGET_1ST and tp_level < 1:
                 partial_pnl = pnl_pct * PARTIAL_SELL_RATIO_1
                 trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL_TP1", "entry_idx": pos["idx"]})
                 pos["partial"] = True
                 pos["tp_level"] = 1
-            # TP2: 잔여의 50% 매도 (전체 30%)
+            # TP2: 잔여의 60% 매도 (전체 30%)
             if pnl_pct >= PROFIT_TARGET_2ND and tp_level == 1:
                 remaining = 1 - PARTIAL_SELL_RATIO_1  # 60%
                 partial_pnl = pnl_pct * remaining * PARTIAL_SELL_RATIO_2
@@ -1756,7 +1756,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
 
         # 스코어 미달 시 매수 차단
         if entry_score < MIN_ENTRY_SCORE:
-            es = min(es, threshold - 1)  # 임계값 미만으로 강제 이동 → HOLD
+            es = 0  # 매수 신호 무효화 → HOLD
 
     threshold = get_regime_threshold(regime_info["regime"])
 
@@ -2143,6 +2143,21 @@ def main():
     pending_exposure   = 0.0
     signal_fired       = False
 
+    # v5.20.1: 일일 손절 횟수/손실 체크 (DAILY_LOSS_LIMIT_PCT, MAX_SL_PER_DAY)
+    daily_sl_count = 0
+    daily_loss_pct = 0.0
+    meta = portfolio.get("_meta", {})
+    daily_dd = meta.get("daily_dd", 0)
+    daily_loss_pct = daily_dd * 100  # 0~100% 스케일
+    # order_log에서 당일 STOP_CD 횟수 카운트
+    today_str = utc_now().strftime("%Y-%m-%d")
+    for key, val in order_log.items():
+        if key.endswith("_STOP_CD") and isinstance(val, str) and val.startswith(today_str):
+            daily_sl_count += 1
+    daily_buy_blocked = (daily_sl_count >= MAX_SL_PER_DAY or daily_loss_pct >= DAILY_LOSS_LIMIT_PCT)
+    if daily_buy_blocked:
+        print(f"   🚫 일일 손절 한도 도달 (SL {daily_sl_count}회/{MAX_SL_PER_DAY}, 손실 {daily_loss_pct:.1f}%/{DAILY_LOSS_LIMIT_PCT}%) — 신규 매수 차단")
+
     for r in results:
         if r["signal"] == "NO_DATA":
             continue
@@ -2170,10 +2185,10 @@ def main():
                 except (ValueError, TypeError):
                     pass
 
-            # v5.20.1: 3단계 분할 익절 — TP1(3%) 40% → TP2(7%) 30% → TP3(10%) 전량
+            # v5.20.1: 3단계 분할 익절 — TP1(3%) 50% → TP2(7%) 30% → TP3(10%) 전량
             tp_level = pos.get("tp_level", 0)  # 0=미익절, 1=TP1완료, 2=TP2완료
 
-            # TP1: +3%에서 40% 매도
+            # TP1: +3%에서 50% 매도
             if pnl_pct >= PROFIT_TARGET_1ST and tp_level < 1:
                 vol = pos.get("volume", 0)
                 sell_vol = vol * PARTIAL_SELL_RATIO_1
@@ -2192,11 +2207,11 @@ def main():
                             f"💰 <b>{name}</b> TP1 익절 ({PARTIAL_SELL_RATIO_1*100:.0f}%)\n"
                             f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                             f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
-                        print(f"   💰 {name} TP1 익절: {pnl_pct:+.1f}% (40% 매도)")
+                        print(f"   💰 {name} TP1 익절: {pnl_pct:+.1f}% (50% 매도)")
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
 
-            # TP2: +7%에서 잔여의 50% 매도 (전체 기준 30%)
+            # TP2: +7%에서 잔여의 60% 매도 (전체 기준 30%)
             if pnl_pct >= PROFIT_TARGET_2ND and tp_level == 1:
                 vol = pos.get("volume", 0)
                 sell_vol = vol * PARTIAL_SELL_RATIO_2
@@ -2223,6 +2238,12 @@ def main():
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "PROFIT_TARGET"
                 print(f"   🎯 {name} TP3 익절: {pnl_pct:+.1f}% ≥ {PROFIT_TARGET_3RD}%")
+
+            # v5.20.1: CATASTROPHIC STOP — 갭다운 즉시 매도 (MIN_HOLD_HOURS 무시)
+            elif pnl_pct <= -CATASTROPHIC_STOP_PCT:
+                r["signal"] = "CLOSE"
+                r["close_reason"] = "CATASTROPHIC_STOP"
+                print(f"   🚨 {name} 긴급 손절: {pnl_pct:+.1f}% ≤ -{CATASTROPHIC_STOP_PCT}% (즉시 매도)")
 
             # v4.0: 고정 손절 → 최소 보유시간 이후에만
             elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
@@ -2253,7 +2274,7 @@ def main():
 
         # v5.20: 신호 매도 Churn 방지 — 최소 보유시간 + 최소 PnL 기준
         if r["signal"] == "CLOSE" and ticker in portfolio:
-            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "TIME_STOP", "TRAILING_STOP", "ORPHAN_POSITION"):
+            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "CATASTROPHIC_STOP", "TIME_STOP", "TRAILING_STOP", "ORPHAN_POSITION"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 entry_p = portfolio[ticker].get("entry_price", 0)
                 sig_pnl = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
@@ -2390,7 +2411,7 @@ def main():
                             signal_fired = True
                             drop_pct = (r["price"] / pos["entry_price"] - 1) * 100
                             send_telegram(
-                                f"📉 <b>{name}</b> 분할매수 {pos['dca_count']+1}차 (DCA)\n"
+                                f"📉 <b>{name}</b> 분할매수 {pos['dca_count']}차 (DCA)\n"
                                 f"추가 {_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])} ({drop_pct:+.1f}%)\n"
                                 f"평균단가: {_fmt_krw(pos['entry_price'])}")
                             print(f"   📉 {name} 분할매수: +{_fmt_krw(add_krw)} @ {_fmt_krw(r['price'])} (평단 {_fmt_krw(pos['entry_price'])})")
@@ -2399,6 +2420,11 @@ def main():
                 else:
                     print(f"   ℹ️ {name} 이미 보유 중 — 추가 매수 생략")
             else:
+                # v5.20.1: 일일 손절 한도 시 신규 매수 차단
+                if daily_buy_blocked:
+                    name = ticker.replace("KRW-", "")
+                    print(f"   🚫 {name} 신규 매수 차단 (일일 손절 한도)")
+                    continue
                 corr_penalty    = calc_correlation_penalty(
                     list(portfolio_tickers) + pending_buy_tickers + [ticker],
                     {t: signal_data[t] for t in signal_data},
