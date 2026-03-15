@@ -154,24 +154,26 @@ import mplfinance as mpf
 # 설정
 # ============================================
 TICKERS = [
-    # 대형주 (14종목 — 유동성 최상위, 24h 거래대금 500억+ 안정)
+    # Tier A: 대형주 (14종목 — 유동성 최상위)
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
     "KRW-EOS", "KRW-XLM", "KRW-ETC", "KRW-PEPE",
-    # v5.4 Tier A 추가: EOS(결제L1), XLM(결제), ETC(L1), PEPE(밈 대형)
-    # 중형주 (13종목 — 24h 거래대금 200억+ 실시간 필터 보완)
+    # Tier B: 중형주 (13종목 — 섹터 분산)
     "KRW-SUI", "KRW-BCH", "KRW-APT",
     "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
     "KRW-ARB", "KRW-SEI", "KRW-STX", "KRW-ATOM", "KRW-AAVE", "KRW-IMX",
-    # v5.4 Tier B 추가: ARB(L2), SEI(L1), STX(BTC-L2), ATOM(인터체인),
-    #                    AAVE(DeFi), IMX(게이밍) — 섹터 분산 강화
-    # 소형주 (1종목 — 밈코인 거래대금 상위)
-    "KRW-SHIB",
-    # v5.4 제외: OP (ARB과 ρ=0.82, L2 섹터 중복 → ARB만 편입)
-    # v5.0 제거: BERA(신규상장 변동성), AXL(거래대금 불안정)
-    #            ORCA(유동성 부족), SAHARA(전손), DEEP/IP/ATH/FLOW/MANTRA/ZETA/ANKR
-    # v5.2→5.3: VIRTUAL 임시 복원→재제거 (3/10 청산 완료, 보유 포지션 0건)
-    # ⚠️ 향후 보유 중 종목 제거 금지 → scan_ghost_positions()로 탐지
+    # Tier C: 소형주 + 고변동 (13종목 — v5.20.1 확대, 거래대금·등락폭 기반 선별)
+    "KRW-SHIB",                                    # 밈 대형
+    "KRW-TRUMP",                                   # 밈/정치 (거래대금 311억, 3일 54%)
+    "KRW-AXS", "KRW-YGG",                         # 게이밍 (196억/179억)
+    "KRW-TAO", "KRW-RENDER", "KRW-VIRTUAL",       # AI (61억/24억/37억)
+    "KRW-FLOW",                                    # L1/NFT (69억)
+    "KRW-BSV",                                     # L1/결제 (36억)
+    "KRW-MNT",                                     # L2 (27억)
+    "KRW-BERA",                                    # L1/DeFi (8억, 고변동 15%)
+    "KRW-SAHARA",                                  # AI/데이터 (105억)
+    "KRW-IP",                                      # IP토큰화 (17억)
+    # ⚠️ 보유 중 종목 제거 금지 → scan_ghost_positions()로 탐지
 ]
 INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 5_000_000))  # KRW 500만원 기본
 
@@ -290,13 +292,12 @@ PROFIT_TARGET_2ND    = 7.0      # v5.20: TP2 — 중간 익절 (추세 지속 �
 PROFIT_TARGET_3RD    = 10.0     # v5.20.1 신설: TP3 — stretch 타겟 (강한 추세 시 최종 확정)
                                 # TP2(7%)→TP3(10%) 3%p 간격, 충돌 없음
                                 # 대원칙1 "수익 극대화" — 잔여 30%가 +10%까지 추가 기회 확보
-PARTIAL_SELL_RATIO_1 = 0.4      # v5.20.1: TP1에서 40% 매도 (기존 60% → 40%로 축소)
-                                # 근거: 3단계 분할매도 → 각 단계 비중 분산
-                                # TP1(40%) + TP2(30%) + TP3(30%) = 100%
-                                # 대원칙4 "올랐을 때 확실히 익절" — 3%에서 40% 즉시 확정
-PARTIAL_SELL_RATIO_2 = 0.5      # v5.20.1 신설: TP2에서 잔여의 50% 매도 (전체 기준 30%)
-                                # TP1 후 잔여 60% × 50% = 30% 매도
-                                # TP3용 잔여 30% 유지
+PARTIAL_SELL_RATIO_1 = 0.5      # v5.20.1: TP1에서 50% 매도 (가장 빈번한 TP — 절반 확정)
+                                # TP1(50%) + TP2(30%) + TP3(20%) = 100%
+                                # 대원칙4 "올랐을 때 확실히 익절" — 3%에서 절반 즉시 확정
+PARTIAL_SELL_RATIO_2 = 0.6      # v5.20.1: TP2에서 잔여의 60% 매도 (전체 기준 30%)
+                                # TP1 후 잔여 50% × 60% = 30% 매도
+                                # TP3용 잔여 20% 유지
                                 # 대원칙1 "수익 실현이 최우선" — 단계별 확정 비중 분산
 LOSS_CUT_PCT         = 5.0      # v5.20: 6.0→5.0% (4%/6% 절충 — 노이즈 SL 방지 + 손실 제한)
                                 # 근거: 5% = 2.5σ(일일SL확률5~8%), CATASTROPHIC(10%)까지 5%p 간격
