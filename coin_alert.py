@@ -311,17 +311,9 @@ CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 
                                 # 즉시 시장가 전량 매도, MIN_HOLD_HOURS 무시
                                 # 대원칙2 "손절은 최후의 수단" — 10%는 구조적 붕괴 임계
 # v5.18 신설: 일일 손실 서킷브레이커 (3/14 4연속 SL 교훈)
-DAILY_LOSS_LIMIT_PCT = 3.0      # v5.18 신설: 일일 최대 허용 손실 (자본금 대비 %)
-                                # 근거: 3/14 -1.72% 일일손실 → 3%에서 당일 신규 매수 완전 차단
-                                # 전종목 동시SL 최대 -3.6% → 3% 도달 시 추가 진입 방지
-                                # CATASTROPHIC(10%)은 개별종목, 이것은 포트폴리오 레벨 차단
-                                # 대원칙2 "손절 최소화" — 일일 누적 손실 상한 설정
-MAX_SL_PER_DAY       = 2        # v5.18 신설: 일일 최대 손절 횟수
-                                # 근거: 2회 SL 연속 = 시장 레짐 불리 확인, 추가 진입은 반복 손실
-                                # 3/14 교훈: 2회 차단 시 3~4번째 SL(-0.86%) 방지 가능
-                                # 알트코인 ρ≈0.6 — 2종목 SL 시 나머지도 동반하락 가능성 높음
-                                # 다음 날 00:00 KST 자동 리셋
-                                # 대원칙2 "손절 최소화" — 횟수 기반 서킷브레이커
+# v5.20.1: DAILY_LOSS_LIMIT_PCT, MAX_SL_PER_DAY 제거
+# 이유: 대원칙5 "하락장에서 포지션 구축" — SL 발동 후가 오히려 저점 매수 기회
+# 매수 차단은 대원칙1 "수익 극대화"에 위배. 개별 종목 리스크는 SL(-5%)이 담당.
 REBUY_DROP_PCT       = 3.0      # v4.2: 5→3% (평균회귀 사이클에 맞는 재진입 허용)
 STOP_COOLDOWN_HOURS  = 4        # v5.7: 6→4h (실매수 미체결 대응 — 야간 손절 후 오전 차단 해소)
                                 # 근거: 6h는 새벽 손절 시 오전 세션 진입 차단 (03시SL→09시해제)
@@ -2143,20 +2135,6 @@ def main():
     pending_exposure   = 0.0
     signal_fired       = False
 
-    # v5.20.1: 일일 손절 횟수/손실 체크 (DAILY_LOSS_LIMIT_PCT, MAX_SL_PER_DAY)
-    daily_sl_count = 0
-    daily_loss_pct = 0.0
-    meta = portfolio.get("_meta", {})
-    daily_dd = meta.get("daily_dd", 0)
-    daily_loss_pct = daily_dd * 100  # 0~100% 스케일
-    # order_log에서 당일 STOP_CD 횟수 카운트
-    today_str = utc_now().strftime("%Y-%m-%d")
-    for key, val in order_log.items():
-        if key.endswith("_STOP_CD") and isinstance(val, str) and val.startswith(today_str):
-            daily_sl_count += 1
-    daily_buy_blocked = (daily_sl_count >= MAX_SL_PER_DAY or daily_loss_pct >= DAILY_LOSS_LIMIT_PCT)
-    if daily_buy_blocked:
-        print(f"   🚫 일일 손절 한도 도달 (SL {daily_sl_count}회/{MAX_SL_PER_DAY}, 손실 {daily_loss_pct:.1f}%/{DAILY_LOSS_LIMIT_PCT}%) — 신규 매수 차단")
 
     for r in results:
         if r["signal"] == "NO_DATA":
@@ -2420,11 +2398,6 @@ def main():
                 else:
                     print(f"   ℹ️ {name} 이미 보유 중 — 추가 매수 생략")
             else:
-                # v5.20.1: 일일 손절 한도 시 신규 매수 차단
-                if daily_buy_blocked:
-                    name = ticker.replace("KRW-", "")
-                    print(f"   🚫 {name} 신규 매수 차단 (일일 손절 한도)")
-                    continue
                 corr_penalty    = calc_correlation_penalty(
                     list(portfolio_tickers) + pending_buy_tickers + [ticker],
                     {t: signal_data[t] for t in signal_data},
