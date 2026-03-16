@@ -1,12 +1,15 @@
 """
-🪙 Coin Alert System v5.31 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.32 — Upbit KRW 자동매매
+
+v5.32: 손절최소화 대원칙 정비 — 매도 순서 재설계 (2026-03-16)
+- [CRITICAL] 라이브 매도 순서 수정: TP3→CATASTROPHIC→TIME_STOP→SL (SL이 TIME_STOP보다 먼저 발동 수정)
+- [CRITICAL] 백테스트 매도 순서 동기화 + CATASTROPHIC_STOP/TRAILING_STOP 추가
+- [원칙] 손절최소화: SL은 모든 다른 EXIT(TP/TRAILING/TIME) 이후 최후의 수단
 
 v5.31: 정비 — 5건 버그 일괄 수정 (2026-03-16)
 - [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0→3.0% 실제 적용 (v5.27~v5.29 로그만 기록, 상수 미변경)
 - [BUG] _sell_memory 불일치 오경보 수정 (actual_set에서 _sell_memory 제외 누락)
-- [CLEANUP] MIN_VALID_ENTRY_PRICE 유령 상수 제거 (v5.23에서 로직 제거했으나 상수 잔존)
-- [CLEANUP] EOS/FLOW 티커 제거 (Upbit 데이터 없음 — 매 실행 경고)
-- [NOTE] safe_api_call 정의만 있고 미사용 — 향후 API 호출에 적용 예정
+- [CLEANUP] MIN_VALID_ENTRY_PRICE 유령 상수 제거, EOS/FLOW 티커 제거
 
 v5.30: Quick Fix 적용 (2026-03-16)
 - [Quick Fix] 버전 및 변경 로그 업데이트
@@ -1558,11 +1561,14 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
         if pos is None:
             if total >= current_threshold:
                 entry_price = next_open * (1 + cost_pct)
-                pos = {"entry": entry_price, "idx": i + 1, "partial": False, "tp_level": 0}
+                pos = {"entry": entry_price, "idx": i + 1, "partial": False, "tp_level": 0, "high_pnl": 0}
         else:
             hold_days = i - pos["idx"]
             cp = float(t_bar["Close"])
             pnl_pct = (cp / pos["entry"] - 1) * 100
+
+            # 트레일링 고점 갱신
+            pos["high_pnl"] = max(pos.get("high_pnl", 0), pnl_pct)
 
             # v5.20.1: 3단계 분할 익절 반영
             tp_level = pos.get("tp_level", 0)
@@ -1579,17 +1585,25 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
                 trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL_TP2", "entry_idx": pos["idx"]})
                 pos["tp_level"] = 2
 
+            # v5.31: 매도 우선순위 (손절최소화 대원칙)
+            # TP3 → CATASTROPHIC → TIME_STOP → TRAILING → SL → SIGNAL_EXIT
             exit_reason = None
             exit_price  = None
             if pnl_pct >= PROFIT_TARGET_3RD:
                 exit_reason = "PROFIT_TARGET"
                 exit_price  = cp * (1 - cost_pct)
-            elif pnl_pct <= -LOSS_CUT_PCT:
-                exit_reason = "STOP_LOSS"
+            elif pnl_pct <= -CATASTROPHIC_STOP_PCT:
+                exit_reason = "CATASTROPHIC_STOP"
                 exit_price  = cp * (1 - cost_pct)
             elif hold_days >= MAX_HOLD_DAYS:
                 exit_reason = "TIME_STOP"
                 exit_price  = next_open * (1 - cost_pct)
+            elif pos["high_pnl"] >= TRAILING_ACTIVATE_PCT and (pos["high_pnl"] - pnl_pct) >= TRAILING_CALLBACK_PCT:
+                exit_reason = "TRAILING_STOP"
+                exit_price  = cp * (1 - cost_pct)
+            elif pnl_pct <= -LOSS_CUT_PCT:
+                exit_reason = "STOP_LOSS"
+                exit_price  = cp * (1 - cost_pct)
             elif total <= -current_threshold:
                 exit_reason = "SIGNAL_EXIT"
                 exit_price  = next_open * (1 - cost_pct)
@@ -2303,19 +2317,19 @@ def main():
                 r["close_reason"] = "CATASTROPHIC_STOP"
                 print(f"   🚨 {name} 긴급 손절: {pnl_pct:+.1f}% ≤ -{CATASTROPHIC_STOP_PCT}% (즉시 매도)")
 
-            # v4.0: 고정 손절 → 최소 보유시간 이후에만
+            # v4.0: 시간 스탑 — 보유 기간 MAX_HOLD_DAYS 초과 (SL보다 우선)
+            elif hold_days >= MAX_HOLD_DAYS:
+                r["signal"] = "CLOSE"
+                r["close_reason"] = "TIME_STOP"
+                print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 ≥ {MAX_HOLD_DAYS}일")
+
+            # v5.31: 고정 손절 — TIME_STOP/TRAILING 이후 최후의 수단 (손절최소화 대원칙)
             elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "STOP_LOSS"
                 print(f"   🛡️ {name} 손절: {pnl_pct:+.1f}% ≤ -{LOSS_CUT_PCT}%")
             elif pnl_pct <= -LOSS_CUT_PCT:
                 print(f"   ⏳ {name} 손절 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
-
-            # v4.0: 시간 스탑 — 보유 기간 MAX_HOLD_DAYS 초과
-            elif r["signal"] not in ("CLOSE", "STRONG_CLOSE") and hold_days >= MAX_HOLD_DAYS:
-                r["signal"] = "CLOSE"
-                r["close_reason"] = "TIME_STOP"
-                print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 ≥ {MAX_HOLD_DAYS}일")
 
             # v4.1: 트레일링 익절 — 수익 고점 대비 콜백 시 매도
             if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
