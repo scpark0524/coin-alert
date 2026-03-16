@@ -241,9 +241,20 @@ def safe_api_call(func, *args, max_retries=API_RETRY_COUNT, **kwargs):
 # ============================================
 # v5.34: Upbit KRW 전종목 자동 조회 (하드코딩 제거)
 # 진입 필터(RSI, 거래대금, 진입점수 등)가 허술한 종목을 걸러주므로 전종목 스캔해도 안전
+# API 실패 시 기존 관리 종목으로 폴백
 TICKERS_FALLBACK = [
+    # 대형주
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
+    "KRW-XLM", "KRW-ETC", "KRW-PEPE",
+    # 중형주
+    "KRW-SUI", "KRW-BCH", "KRW-APT", "KRW-ONDO", "KRW-UNI",
+    "KRW-HBAR", "KRW-NEAR", "KRW-ARB", "KRW-SEI", "KRW-STX",
+    "KRW-ATOM", "KRW-AAVE", "KRW-IMX",
+    # 소형주 + 고변동
+    "KRW-SHIB", "KRW-TRUMP", "KRW-AXS", "KRW-YGG", "KRW-TAO",
+    "KRW-RENDER", "KRW-VIRTUAL", "KRW-BSV", "KRW-MNT", "KRW-BERA",
+    "KRW-SAHARA", "KRW-IP",
 ]
 
 def fetch_krw_tickers():
