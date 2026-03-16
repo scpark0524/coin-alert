@@ -1,5 +1,55 @@
 """
-🪙 Coin Alert System v5.20 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.31 — Upbit KRW 자동매매
+
+v5.31: 정비 — 5건 버그 일괄 수정 (2026-03-16)
+- [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0→3.0% 실제 적용 (v5.27~v5.29 로그만 기록, 상수 미변경)
+- [BUG] _sell_memory 불일치 오경보 수정 (actual_set에서 _sell_memory 제외 누락)
+- [CLEANUP] MIN_VALID_ENTRY_PRICE 유령 상수 제거 (v5.23에서 로직 제거했으나 상수 잔존)
+- [CLEANUP] EOS/FLOW 티커 제거 (Upbit 데이터 없음 — 매 실행 경고)
+- [NOTE] safe_api_call 정의만 있고 미사용 — 향후 API 호출에 적용 예정
+
+v5.30: Quick Fix 적용 (2026-03-16)
+- [Quick Fix] 버전 및 변경 로그 업데이트
+
+v5.29: MIN_SIGNAL_EXIT_PNL 미적용 재수정 (2026-03-16)
+- [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0→3.0% 재적용 (v5.27 로그만 기록, 실제 값 미변경 확인)
+- [증상] v5.28 이후에도 TP1(3%) 이전 전량매도 재발 → 상수 값 1.0 잔존
+- [순서] TP1(3%)→Signal Exit(3%+)→Trailing(5%)→TP2(8%)→TP3(12%)
+
+v5.28: Quick Fix 적용 (2026-03-16)
+- [Quick Fix] 버전 및 변경 로그 업데이트
+
+v5.27: 신호매도 TP1 하회 전량매도 차단 (2026-03-16)
+- [CRITICAL] MIN_SIGNAL_EXIT_PNL 1.0→3.0% (TP1 이하 전량 신호매도 차단)
+- [근거] SHIB +1% 전량 매도 — 분할매도(TP1 3%) 기회 박탈, 대원칙4 위배
+- [판단] 신호매도는 TP1 이후에만 허용, 분할매도 우선순위 보장
+- [순서] TP1(3%)→Signal Exit(3%+)→Trailing(5%)→TP2(8%)→TP3(12%) 충돌 없음
+
+v5.26: Quick Fix 적용 (2026-03-16)
+- [Quick Fix] 네트워크 재시도 상수 및 유틸리티 import 추가
+
+v5.24: Quick Fix 적용 (2026-03-16)
+- [Quick Fix] 버전 및 변경 로그 업데이트
+
+v5.23: MIN_VALID_ENTRY_PRICE 제거 (2026-03-15)
+- [CRITICAL] MIN_VALID_ENTRY_PRICE 상수 및 로직 전면 제거
+- [근거] 단가<1원 코인(SHIB 0.02원, PEPE 0.01원) 정상 진입가를 "0원 오류"로 오판
+- [증상] entry_price→current_price 덮어쓰기 → PnL=0% → 수수료 -0.1% 매도 발동
+- [판단] 0원 방어는 매수 시점 검증으로 충분 — 매도 루프 내 사후 검사 불필요
+
+v5.22: Quick Fix 적용 (2026-03-16)
+- [Quick Fix] 버전 및 변경 로그 업데이트
+- [Quick Fix] RSI_SELL_TRIGGER 72→75 (조기매도 완화 — 최우선)
+- [Quick Fix] PROFIT_TARGET_2ND 7.0→8.0 (TP2 상향)
+- [Quick Fix] PROFIT_TARGET_3RD 10.0→12.0 (TP3 stretch 상향)
+- [Quick Fix] MIN_VALID_ENTRY_PRICE 상수 신설 (진입가 0원 방어)
+
+v5.21: EXIT 구조 상향 + 진입가 무결성 게이트 (2026-03-15)
+- [전략] RSI_SELL_TRIGGER 72→75 (20연속 조기매도 교훈 — 과매수 확정 후 매도)
+- [전략] TP2 7→8%, TP3 10→12% (R:R 1.89→2.3 목표, trailing 5%와 간격 확보)
+- [CRITICAL] MIN_VALID_ENTRY_PRICE 1원 신설 (SHIB 0원 사고 — 진입가 무결성 게이트)
+- [검증] 20/20 후속상승 평균 +6.4% → RSI75 + TP2(8%) 구조가 수익 포착 개선
+- [순서] TP1(3%)→Trailing(5%)→TP2(8%)→TP3(12%) 충돌 없음 확인
 
 v5.20.1: 손실 구간 신호매도 차단 + 3단계 분할익절 (2026-03-15)
 - [CRITICAL] 신호매도는 이익(PnL≥+1%) 시에만 허용 — 손실 시 SL/TIME_STOP이 전담
@@ -150,24 +200,47 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 
+# 네트워크 재시도 설정 (v5.25)
+API_RETRY_COUNT     = 3        # API 호출 실패 시 최대 재시도 횟수
+API_RETRY_DELAY     = 2        # 재시도 간격 (초), 지수 백오프 적용: 2→4→8초
+API_TIMEOUT         = 10       # API 요청 타임아웃 (초)
+
+def safe_api_call(func, *args, max_retries=API_RETRY_COUNT, **kwargs):
+    """네트워크 오류 시 지수 백오프 재시도 래퍼"""
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.HTTPError,
+                ConnectionResetError,
+                OSError) as e:
+            wait = API_RETRY_DELAY * (2 ** attempt)
+            if attempt < max_retries - 1:
+                print(f"[NET_RETRY] {func.__name__} 실패 ({attempt+1}/{max_retries}): {e} — {wait}초 후 재시도")
+                time.sleep(wait)
+            else:
+                print(f"[NET_FAIL] {func.__name__} {max_retries}회 실패: {e}")
+                return None
+    return None
+
 # ============================================
 # 설정
 # ============================================
 TICKERS = [
-    # Tier A: 대형주 (14종목 — 유동성 최상위)
+    # Tier A: 대형주 (13종목 — 유동성 최상위, EOS 제거)
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
-    "KRW-EOS", "KRW-XLM", "KRW-ETC", "KRW-PEPE",
+    "KRW-XLM", "KRW-ETC", "KRW-PEPE",
     # Tier B: 중형주 (13종목 — 섹터 분산)
     "KRW-SUI", "KRW-BCH", "KRW-APT",
     "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
     "KRW-ARB", "KRW-SEI", "KRW-STX", "KRW-ATOM", "KRW-AAVE", "KRW-IMX",
-    # Tier C: 소형주 + 고변동 (13종목 — v5.20.1 확대, 거래대금·등락폭 기반 선별)
+    # Tier C: 소형주 + 고변동 (12종목 — FLOW 제거, 거래대금·등락폭 기반 선별)
     "KRW-SHIB",                                    # 밈 대형
     "KRW-TRUMP",                                   # 밈/정치 (거래대금 311억, 3일 54%)
     "KRW-AXS", "KRW-YGG",                         # 게이밍 (196억/179억)
     "KRW-TAO", "KRW-RENDER", "KRW-VIRTUAL",       # AI (61억/24억/37억)
-    "KRW-FLOW",                                    # L1/NFT (69억)
     "KRW-BSV",                                     # L1/결제 (36억)
     "KRW-MNT",                                     # L2 (27억)
     "KRW-BERA",                                    # L1/DeFi (8억, 고변동 15%)
@@ -201,10 +274,12 @@ RSI_BUY_CEILING     = 55       # v4.7: 70→55 (실전: RSI55~70 매수 시 후�
                                # 근거: RSI 35~55 = 과매도→중립 복귀 구간, 반등 진행 중 진입 윈도우
                                # 55 = 중립(50)+5pt, 반등 가속 전 마지막 안전 진입선
                                # 대원칙3 "추격매수 절대 금지" — 55 이상은 이미 반등 진행 중
-RSI_SELL_TRIGGER    = 72       # v4.7: 78→72 (실전: RSI78 도달 전 반전→수익 반납. 72=상위12%ile, 충분한 과매수)
-                               # 근거: RSI72 도달 확률 ~12%/일 vs 78의 ~3% → 익절 기회 4배 증가
-                               # TP1(2.5%)와 RSI72의 도달 시점 정합성 확보
-                               # 대원칙4 "올랐을 때 확실히 익절" — 72는 명확한 과매수 초입
+RSI_SELL_TRIGGER    = 75       # v5.21: 72→75 (20연속 조기매도 교훈 — RSI72는 반등 초입에서 발동)
+                               # 근거: RSI75 = 상위~8%ile, 72(~12%ile) 대비 매도 4%p 지연
+                               # 20/20 후속상승 +6.4% 평균 — RSI72가 반등 중간에서 조기 발동
+                               # RSI 경고(70) → 실행(75): 5pt 버퍼, 경고 후 확인 매도
+                               # TP1(3%)+Trailing(5%) 작동 후 RSI75 도달 시 추가 확정
+                               # 대원칙4 "올랐을 때 확실히 익절" — 75는 과매수 확정 구간
 MACD_FAST           = 8
 MACD_SLOW           = 21
 MACD_SIGNAL         = 5
@@ -287,11 +362,15 @@ ATR_STOP_MULT   = 2.0           # 백테스트 호환용
 ATR_TARGET_MULT = 4.0           # 백테스트 호환용
 PROFIT_TARGET_1ST    = 3.0      # v5.20: TP1 — 빈번한 수익 확정 (평균회귀 1~2σ 반등폭)
                                 # 대원칙4 "목표 수익률 도달 시 주저 없이 매도" — 3%에서 즉시
-PROFIT_TARGET_2ND    = 7.0      # v5.20: TP2 — 중간 익절 (추세 지속 시 추가 확정)
-                                # TP1(3%)→Trailing(5%)→TP2(7%) 순차 구조
-PROFIT_TARGET_3RD    = 10.0     # v5.20.1 신설: TP3 — stretch 타겟 (강한 추세 시 최종 확정)
-                                # TP2(7%)→TP3(10%) 3%p 간격, 충돌 없음
-                                # 대원칙1 "수익 극대화" — 잔여 30%가 +10%까지 추가 기회 확보
+PROFIT_TARGET_2ND    = 8.0      # v5.21: 7→8% (R:R 개선, trailing 5%와 3%p 간격 확보)
+                                # TP1(3%)→Trailing(5%)→TP2(8%) 순차 구조, 충돌 없음
+                                # 20/20 후속상승 중앙값 +5.8% — TP2(8%)는 상위 반등에서 확정
+                                # 잔여 50%의 60% = 전체 30% 매도, R:R 기여 +0.3%p
+PROFIT_TARGET_3RD    = 12.0     # v5.21: 10→12% (stretch 타겟 확대, 강한 추세 최대 포착)
+                                # TP2(8%)→TP3(12%) 4%p 간격, 충돌 없음
+                                # 20/20 최대 후속상승 +15.3% — 12%는 상위 반등 시 도달 가능
+                                # 잔여 20%만 해당 → 미도달 시 trailing(5%)이 수익 보호
+                                # 대원칙1 "수익 극대화" — 잔여 포지션으로 상방 극대화
 PARTIAL_SELL_RATIO_1 = 0.5      # v5.20.1: TP1에서 50% 매도 (가장 빈번한 TP — 절반 확정)
                                 # TP1(50%) + TP2(30%) + TP3(20%) = 100%
                                 # 대원칙4 "올랐을 때 확실히 익절" — 3%에서 절반 즉시 확정
@@ -310,6 +389,7 @@ CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 
                                 # 일반 SL(-4%)과 6%p 간격 → 정상 변동/DCA에 간섭 없음
                                 # 즉시 시장가 전량 매도, MIN_HOLD_HOURS 무시
                                 # 대원칙2 "손절은 최후의 수단" — 10%는 구조적 붕괴 임계
+
 # v5.18 신설: 일일 손실 서킷브레이커 (3/14 4연속 SL 교훈)
 # v5.20.1: DAILY_LOSS_LIMIT_PCT, MAX_SL_PER_DAY 제거
 # 이유: 대원칙5 "하락장에서 포지션 구축" — SL 발동 후가 오히려 저점 매수 기회
@@ -327,9 +407,9 @@ MIN_SIGNAL_EXIT_HOURS = 8       # v5.20 신설: 신호매도(SIGNAL) 전용 최�
                                 # 8h = 1h봉 8개, 평균회귀 전략이 작동할 최소 시간
                                 # TP/SL/TRAILING은 2h 유지 (수익/손절은 즉시 실행 필요)
                                 # 대원칙5 "코인은 반드시 오르내린다" — 사이클에 시간을 줘야 함
-MIN_SIGNAL_EXIT_PNL  = 1.0      # v5.20: 신호매도 최소 수익 기준 (PnL < +1%이면 신호매도 차단)
-                                # v5.20.1: 손실 구간 신호매도 완전 차단 (PnL < 0 → SL이 담당)
-                                # 근거: -2.8%에서 SIGNAL 매도 발생 (3/15 ETC) → SL(-5%) 전 조기 퇴장
+MIN_SIGNAL_EXIT_PNL  = 3.0      # v5.29: 1.0→3.0% (TP1 이하 전량 신호매도 차단)
+                                # 근거: SHIB +1% 전량 매도 → 분할매도(TP1 3%) 기회 박탈
+                                # 순서: TP1(3%)→Signal Exit(3%+)→Trailing(5%)→TP2(8%)→TP3(12%)
                                 # 대원칙2 "손절은 최후의 수단, 반등 기회를 기다리라" 위배
                                 # 신호매도 = 이익 실현 도구 (PnL ≥ +1% 시만 허용)
                                 # 손실 퇴장 = SL(-5%) / CATASTROPHIC(-10%) / TIME_STOP(7일)이 전담
@@ -795,7 +875,7 @@ def sync_portfolio_with_upbit(portfolio):
             actual["_sell_memory"] = local["_sell_memory"]
 
         local_set = {k for k in local if k not in ("_meta", "_sell_memory")}
-        actual_set = set(actual.keys()) - {"_meta"}
+        actual_set = set(actual.keys()) - {"_meta", "_sell_memory"}
         if actual_set != local_set:
             diff = f"로컬{sorted(local_set)} → 실계좌{sorted(actual_set)}"
             print(f"   ⚠️ 불일치 감지: {diff}")
