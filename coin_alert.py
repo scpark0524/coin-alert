@@ -1,5 +1,10 @@
 """
-🪙 Coin Alert System v5.33 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.34 — Upbit KRW 자동매매
+
+v5.34: Upbit KRW 전종목 자동 스캔 — 하드코딩 티커 제거 (2026-03-16)
+- [전략] pyupbit.get_tickers(fiat="KRW")로 전종목 동적 조회 (~120종목)
+- [근거] 상장/상폐 자동 대응, 진입 필터가 허술한 종목 자동 차단
+- [안전] API 실패 시 10종목 폴백 리스트 사용
 
 v5.33: 동시 보유 종목 8→12 확대 — 자본 활용률 개선 (2026-03-16)
 - [전략] MAX_CONCURRENT_POSITIONS 8→12 (60% 첫매수×12=86%, 85% 노출 상한이 자연 캡)
@@ -234,27 +239,25 @@ def safe_api_call(func, *args, max_retries=API_RETRY_COUNT, **kwargs):
 # ============================================
 # 설정
 # ============================================
-TICKERS = [
-    # Tier A: 대형주 (13종목 — 유동성 최상위, EOS 제거)
+# v5.34: Upbit KRW 전종목 자동 조회 (하드코딩 제거)
+# 진입 필터(RSI, 거래대금, 진입점수 등)가 허술한 종목을 걸러주므로 전종목 스캔해도 안전
+TICKERS_FALLBACK = [
     "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
     "KRW-ADA", "KRW-AVAX", "KRW-LINK", "KRW-DOT", "KRW-TRX",
-    "KRW-XLM", "KRW-ETC", "KRW-PEPE",
-    # Tier B: 중형주 (13종목 — 섹터 분산)
-    "KRW-SUI", "KRW-BCH", "KRW-APT",
-    "KRW-ONDO", "KRW-UNI", "KRW-HBAR", "KRW-NEAR",
-    "KRW-ARB", "KRW-SEI", "KRW-STX", "KRW-ATOM", "KRW-AAVE", "KRW-IMX",
-    # Tier C: 소형주 + 고변동 (12종목 — FLOW 제거, 거래대금·등락폭 기반 선별)
-    "KRW-SHIB",                                    # 밈 대형
-    "KRW-TRUMP",                                   # 밈/정치 (거래대금 311억, 3일 54%)
-    "KRW-AXS", "KRW-YGG",                         # 게이밍 (196억/179억)
-    "KRW-TAO", "KRW-RENDER", "KRW-VIRTUAL",       # AI (61억/24억/37억)
-    "KRW-BSV",                                     # L1/결제 (36억)
-    "KRW-MNT",                                     # L2 (27억)
-    "KRW-BERA",                                    # L1/DeFi (8억, 고변동 15%)
-    "KRW-SAHARA",                                  # AI/데이터 (105억)
-    "KRW-IP",                                      # IP토큰화 (17억)
-    # ⚠️ 보유 중 종목 제거 금지 → scan_ghost_positions()로 탐지
 ]
+
+def fetch_krw_tickers():
+    """Upbit KRW 마켓 전종목 자동 조회. 실패 시 폴백 리스트 사용."""
+    try:
+        tickers = pyupbit.get_tickers(fiat="KRW")
+        if tickers and len(tickers) > 10:
+            print(f"   ✅ Upbit KRW 전종목 조회: {len(tickers)}종목")
+            return tickers
+    except Exception as e:
+        print(f"   ⚠️ 티커 조회 실패, 폴백 사용: {e}")
+    return TICKERS_FALLBACK
+
+TICKERS = fetch_krw_tickers()
 INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 5_000_000))  # KRW 500만원 기본
 
 # 캔들 설정
