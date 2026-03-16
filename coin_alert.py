@@ -1,5 +1,10 @@
 """
-🪙 Coin Alert System v5.34 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.35 — Upbit KRW 자동매매
+
+v5.35: 투자유의(warning) 종목 매수 차단 (2026-03-16)
+- [안전] Upbit market_event.warning=true 종목 TICKERS에서 자동 제외 (매수 차단)
+- [근거] NOM(거래지원 종료 예정) 매수 발생 → 상폐 예정 코인 진입 방지
+- [범위] 매수만 차단, 이미 보유 중인 종목은 기존 매도 로직으로 정상 처리
 
 v5.34: Upbit KRW 전종목 자동 스캔 — 하드코딩 티커 제거 (2026-03-16)
 - [전략] pyupbit.get_tickers(fiat="KRW")로 전종목 동적 조회 (~120종목)
@@ -257,11 +262,29 @@ TICKERS_FALLBACK = [
     "KRW-SAHARA", "KRW-IP",
 ]
 
+def _fetch_warning_tickers():
+    """Upbit 투자유의(warning) 종목 조회 — 거래지원 종료 예정 등."""
+    try:
+        resp = requests.get("https://api.upbit.com/v1/market/all?is_details=true", timeout=10)
+        if resp.status_code == 200:
+            warned = set()
+            for m in resp.json():
+                if m["market"].startswith("KRW-") and m.get("market_event", {}).get("warning"):
+                    warned.add(m["market"])
+            return warned
+    except Exception as e:
+        print(f"   ⚠️ 투자유의 조회 실패: {e}")
+    return set()
+
 def fetch_krw_tickers():
-    """Upbit KRW 마켓 전종목 자동 조회. 실패 시 폴백 리스트 사용."""
+    """Upbit KRW 마켓 전종목 자동 조회. 투자유의 종목 제외. 실패 시 폴백."""
     try:
         tickers = pyupbit.get_tickers(fiat="KRW")
         if tickers and len(tickers) > 10:
+            warned = _fetch_warning_tickers()
+            if warned:
+                tickers = [t for t in tickers if t not in warned]
+                print(f"   ⚠️ 투자유의 제외: {', '.join(t.replace('KRW-','') for t in warned)}")
             print(f"   ✅ Upbit KRW 전종목 조회: {len(tickers)}종목")
             return tickers
     except Exception as e:
