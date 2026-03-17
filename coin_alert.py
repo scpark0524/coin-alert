@@ -2643,12 +2643,6 @@ def main():
                         signal_fired = True
                         pending_exposure += proposed_pct
                         pending_buy_tickers.append(ticker)
-                        msg = format_signal_message(r)
-                        if msg:
-                            send_telegram(msg)
-                        chart = generate_chart(ticker, signal_data[ticker], r)
-                        if chart:
-                            send_telegram_photo(chart, msg[:1024] if msg else f"{name} BUY")
                         print(f"   📋 {name} 매수 신호 ({'장외 — 주문 미실행' if not cb_triggered else '서킷브레이커'})")
 
         # === 청산 ===
@@ -2700,13 +2694,6 @@ def main():
                             send_telegram(f"❌ <b>{name}</b> 매도 주문 실패 — 수동 확인 필요")
                 else:
                     signal_fired = True
-                    msg = format_signal_message(r)
-                    if msg:
-                        send_telegram(msg)
-                    if ticker in signal_data:
-                        chart = generate_chart(ticker, signal_data[ticker], r)
-                        if chart:
-                            send_telegram_photo(chart, msg[:1024] if msg else f"{name} SELL")
                     print(f"   📋 {name} 청산 신호 ({close_reason}) ({'서킷브레이커' if cb_triggered else '알림만'})")
 
     # 특이사항 알림
