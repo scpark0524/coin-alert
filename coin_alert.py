@@ -1,5 +1,10 @@
 """
-🪙 Coin Alert System v5.35 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.36 — Upbit KRW 자동매매
+
+v5.36: 매매 히스토리 기록 — trade_history.json (2026-03-17)
+- [기능] 모든 매수/매도 시 종목, 가격, 수량, 금액, 사유, 수익률 기록
+- [파일] trade_history.json — 매수(BUY/INITIAL/DCA), 매도(SELL/PARTIAL_SELL/TP1/TP2/SL 등)
+- [매도 기록] entry_price + pnl_pct 포함 (해당 건의 진입가 대비 수익률)
 
 v5.35: 투자유의(warning) 종목 매수 차단 (2026-03-16)
 - [안전] Upbit market_event.warning=true 종목 TICKERS에서 자동 제외 (매수 차단)
@@ -542,6 +547,7 @@ ORDER_COOLDOWN_MINUTES = 60   # v5.7: 120→60분 (실매수 미체결 대응 �
 _BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PORTFOLIO_FILE  = os.path.join(_BASE_DIR, "portfolio.json")
 ORDER_LOG_FILE  = os.path.join(_BASE_DIR, "order_log.json")
+TRADE_HISTORY_FILE = os.path.join(_BASE_DIR, "trade_history.json")
 
 # 환경변수
 TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -822,6 +828,41 @@ def record_order(log, ticker, direction):
     for k in stale:
         del log[k]
     save_order_log(log)
+
+
+# ============================================
+# 매매 히스토리 (trade_history.json)
+# ============================================
+def _load_trade_history():
+    try:
+        if os.path.exists(TRADE_HISTORY_FILE):
+            with open(TRADE_HISTORY_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def _save_trade_history(history):
+    with open(TRADE_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2, ensure_ascii=False)
+
+def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price=0, pnl_pct=0):
+    """매매 히스토리 기록. side='BUY'|'SELL'|'PARTIAL_SELL'"""
+    history = _load_trade_history()
+    record = {
+        "timestamp": utc_now().isoformat(),
+        "ticker": ticker,
+        "side": side,
+        "price": round(price, 2),
+        "volume": round(volume, 8),
+        "krw_amount": round(krw_amount),
+        "reason": reason,
+    }
+    if side in ("SELL", "PARTIAL_SELL"):
+        record["entry_price"] = round(entry_price, 2)
+        record["pnl_pct"] = round(pnl_pct, 2)
+    history.append(record)
+    _save_trade_history(history)
 
 
 # ============================================
@@ -2309,6 +2350,7 @@ def main():
                     order = execute_sell(ticker, sell_vol)
                     if order:
                         record_order(order_log, ticker, "SELL")
+                        record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "TP1", entry_p, pnl_pct)
                         pos["tp_level"] = 1
                         pos["partial_taken"] = True  # 하위 호환
                         pos["volume"] = vol - sell_vol
@@ -2332,6 +2374,7 @@ def main():
                     order = execute_sell(ticker, sell_vol)
                     if order:
                         record_order(order_log, ticker, "SELL")
+                        record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "TP2", entry_p, pnl_pct)
                         pos["tp_level"] = 2
                         pos["volume"] = vol - sell_vol
                         signal_fired = True
@@ -2515,6 +2558,7 @@ def main():
                         order = execute_buy(ticker, add_krw)
                         if order:
                             record_order(order_log, ticker, "BUY")
+                            record_trade(ticker, "BUY", r["price"], add_krw / r["price"], add_krw, "DCA")
                             old_vol = pos.get("volume", 0)
                             add_vol = add_krw / r["price"]
                             new_vol = old_vol + add_vol
@@ -2571,6 +2615,7 @@ def main():
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
+                                record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL")
                                 pending_exposure += proposed_pct
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
@@ -2622,6 +2667,7 @@ def main():
                             signal_fired = True
                             entry_p = portfolio[ticker]["entry_price"]
                             pnl     = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
+                            record_trade(ticker, "SELL", r["price"], vol, vol * r["price"], close_reason, entry_p, pnl)
                             # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
                             if pnl < 0:
                                 order_log[f"{ticker}_STOP_CD"] = utc_now().isoformat()
