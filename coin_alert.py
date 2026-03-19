@@ -1,12 +1,15 @@
 """
 🪙 Coin Alert System v5.39 — Upbit KRW 자동매매
 
-v5.39: 시장추종 구조 개선 — 레짐별 동적 슬롯 + R:R 정상화 (2026-03-19)
-- [구조] 레짐별 동적 MAX_CONCURRENT: BEAR 4 / MILD_BEAR 6 / SIDEWAYS 8 / MILD_BULL 10 / BULL 12
+v5.39: 시장추종 구조 개선 — 레짐별 적응형 스코어링 + R:R 정상화 (2026-03-19)
+- [핵심] get_regime_scoring() — 레짐별 RSI 매수기준/매도기준/TP1/진입점수 동적 적용
+  BEAR: RSI≤20(3점)/≤30(1점), 진입≥7, TP1 2%, RSI매도≥60
+  BULL: RSI≤40(3점)/≤50(1점), 진입≥5, TP1 4%, RSI매도≥80
+- [매도] RSI_SELL — 레짐별 RSI 과매수 시 이익 구간 즉시 매도 (BEAR:60, BULL:80)
 - [구조] TP1_BREAKEVEN_SL 실제 구현 — TP1 후 잔여 포지션 SL을 진입가로 이동
 - [R:R] LOSS_CUT_PCT 5→4% (R:R 0.3→0.38, 필요승률 77→72%)
 - [DCA] DCA_DROP_PCT 3→5% (충분히 더 떨어진 뒤 물타기, DCA→SL 패턴 차단)
-- [진입] MIN_ENTRY_SCORE 5→6, BB_STD 1.3→1.6 (241종목 선택 우위 활용)
+- [진입] BB_STD 1.3→1.6 (241종목 선택 우위 — 진짜 극단치만 매수)
 
 v5.38: Quick Fix 적용 (2026-03-19)
 - [Quick Fix] RSI 매수 윈도우 축소 — RSI_BUY_CEILING 55→45
@@ -366,7 +369,7 @@ PRICE_CHANGE_THRESHOLD = 3.0   # v4.5: 5.0→3.0 (1h봉에서 5% 변동은 상�
                                # 대형 코인(BTC/ETH) 1h 평균 변동 1.5~2.5% → 3%는 평균+1σ 수준
 
 # 스코어링 시스템 (v4.2 신설)
-MIN_ENTRY_SCORE     = 6        # v5.39: 5→6 (241종목 선택 우위 — RSI(3)+BB(2)+1추가 필수)
+MIN_ENTRY_SCORE     = 6        # v5.39: 5→6 (기본값, 레짐별 get_regime_scoring()이 우선 적용)
                                # 근거: 4점은 RSI(3)+ADX_low(1)로 사실상 RSI 단독 트리거
                                # v5.13 실전: 4점 진입 7건 중 완결 1건 수수료 손실 → 품질 부족
                                # 5점 = RSI 과매도
@@ -1498,16 +1501,21 @@ def get_regime_threshold(r):
     }.get(r, SIGNAL_THRESHOLD)
 
 
-def get_regime_max_concurrent(r):
-    """v5.39: 레짐별 동적 슬롯 상한 — 하락장 방어, 상승장 확대"""
+def get_regime_scoring(r):
+    """v5.39: 레짐별 적응형 스코어링 — 시장 상황에 따라 매수/매도 기준 변동.
+
+    하락장: 진짜 바닥에서만 사고, 조금만 올라도 바로 판다
+    상승장: 넓게 사고, 추세를 충분히 탄다
+    """
     return {
-        "BULL":      12,
-        "MILD_BULL": 10,
-        "SIDEWAYS":  8,
-        "MILD_BEAR": 6,
-        "BEAR":      4,
-        "VOLATILE":  6,
-    }.get(r, 8)
+        #                rsi_3pt  rsi_1pt  min_score  sell_trigger  tp1_pct
+        "BEAR":         {"rsi_3pt": 20, "rsi_1pt": 30, "min_entry": 7, "sell_trigger": 60, "tp1_pct": 2.0},
+        "MILD_BEAR":    {"rsi_3pt": 25, "rsi_1pt": 35, "min_entry": 7, "sell_trigger": 65, "tp1_pct": 2.5},
+        "SIDEWAYS":     {"rsi_3pt": 30, "rsi_1pt": 40, "min_entry": 6, "sell_trigger": 70, "tp1_pct": 3.0},
+        "MILD_BULL":    {"rsi_3pt": 35, "rsi_1pt": 45, "min_entry": 6, "sell_trigger": 75, "tp1_pct": 3.0},
+        "BULL":         {"rsi_3pt": 40, "rsi_1pt": 50, "min_entry": 5, "sell_trigger": 80, "tp1_pct": 4.0},
+        "VOLATILE":     {"rsi_3pt": 25, "rsi_1pt": 35, "min_entry": 7, "sell_trigger": 65, "tp1_pct": 2.5},
+    }.get(r, {"rsi_3pt": 30, "rsi_1pt": 40, "min_entry": 6, "sell_trigger": 70, "tp1_pct": 3.0})
 
 
 def get_regime_strategy_weights(r):
@@ -1937,12 +1945,15 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     if es > 0 and rsi > RSI_BUY_CEILING:
         es = min(es, -5)  # 매수 불가 영역으로 강제 이동
 
-    # v5.20.1: 매수 진입 스코어링 gate (대원칙3 "충분히 떨어졌을 때만 진입")
+    # v5.39: 레짐별 적응형 진입 스코어링 (시장 상황에 따라 기준 변동)
+    regime_scoring = get_regime_scoring(regime_info["regime"])
     entry_score = 0
     if es > 0:  # 매수 신호일 때만 스코어링
-        # RSI 과매도 가산 (최대 3점)
-        if rsi <= RSI_OVERSOLD:         entry_score += 3  # RSI ≤ 35: 명확한 과매도
-        elif rsi <= RSI_OVERSOLD + 10:  entry_score += 1  # RSI ≤ 45: 약한 과매도
+        # RSI 과매도 가산 (최대 3점) — 레짐별 기준 적용
+        rsi_3pt = regime_scoring["rsi_3pt"]  # BEAR:20, SIDEWAYS:30, BULL:40
+        rsi_1pt = regime_scoring["rsi_1pt"]  # BEAR:30, SIDEWAYS:40, BULL:50
+        if rsi <= rsi_3pt:              entry_score += 3  # 레짐별 명확한 과매도
+        elif rsi <= rsi_1pt:            entry_score += 1  # 레짐별 약한 과매도
         # BB 하단 근접 가산 (최대 2점)
         bb_lower = float(t["BB_Lower"]) if pd.notna(t.get("BB_Lower")) else cp
         if cp <= bb_lower:              entry_score += 2  # BB 하단 이탈
@@ -1961,8 +1972,9 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
             if percentile >= PRICE_PERCENTILE_BLOCK:
                 entry_score -= PRICE_PERCENTILE_PENALTY  # 고점 구간 -3점
 
-        # 스코어 미달 시 매수 차단
-        if entry_score < MIN_ENTRY_SCORE:
+        # 스코어 미달 시 매수 차단 — 레짐별 기준 적용
+        regime_min_entry = regime_scoring["min_entry"]  # BEAR:7, SIDEWAYS:6, BULL:5
+        if entry_score < regime_min_entry:
             es = 0  # 매수 신호 무효화 → HOLD
 
     threshold = get_regime_threshold(regime_info["regime"])
@@ -2210,8 +2222,9 @@ def main():
     print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
     print(f"   분할익절: TP1 +{PROFIT_TARGET_1ST}%({PARTIAL_SELL_RATIO_1*100:.0f}%) → TP2 +{PROFIT_TARGET_2ND}%({PARTIAL_SELL_RATIO_2*100:.0f}%) → TP3 +{PROFIT_TARGET_3RD}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
-    _regime_max = get_regime_max_concurrent(regime_info["regime"])
-    print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 슬롯: {_regime_max}개({regime_info['regime']}) | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
+    _rs = get_regime_scoring(regime_info["regime"])
+    print(f"   레짐 스코어링({regime_info['regime']}): RSI매수≤{_rs['rsi_3pt']}/{_rs['rsi_1pt']} | 진입≥{_rs['min_entry']}점 | TP1 {_rs['tp1_pct']}% | RSI매도≥{_rs['sell_trigger']}")
+    print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
     print(f"{'='*60}\n")
@@ -2358,7 +2371,11 @@ def main():
 
         ticker = r["ticker"]
 
-        # v4.0: 고정 수익률 기반 매도 체크 (트레일링 스탑/부분 익절 제거)
+        # v5.39: 레짐별 적응형 매도 — 시장 상황에 따라 TP1/RSI 매도 기준 변동
+        regime_sell = get_regime_scoring(regime_info["regime"])
+        regime_tp1 = regime_sell["tp1_pct"]          # BEAR:2%, SIDEWAYS:3%, BULL:4%
+        regime_sell_trigger = regime_sell["sell_trigger"]  # BEAR:60, SIDEWAYS:70, BULL:80
+
         if ticker in portfolio and ticker != "_meta" and ticker != "_sell_memory":
             pos = portfolio[ticker]
             entry_p = pos["entry_price"]
@@ -2382,8 +2399,8 @@ def main():
             # v5.20.1: 3단계 분할 익절 — TP1(3%) 50% → TP2(7%) 30% → TP3(10%) 전량
             tp_level = pos.get("tp_level", 0)  # 0=미익절, 1=TP1완료, 2=TP2완료
 
-            # TP1: +3%에서 50% 매도
-            if pnl_pct >= PROFIT_TARGET_1ST and tp_level < 1:
+            # TP1: 레짐별 목표 (BEAR:2%, SIDEWAYS:3%, BULL:4%)에서 50% 매도
+            if pnl_pct >= regime_tp1 and tp_level < 1:
                 vol = pos.get("volume", 0)
                 sell_vol = vol * PARTIAL_SELL_RATIO_1
                 if can_trade and sell_vol > 0:
@@ -2402,7 +2419,7 @@ def main():
                             f"💰 <b>{name}</b> TP1 익절 ({PARTIAL_SELL_RATIO_1*100:.0f}%)\n"
                             f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                             f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
-                        print(f"   💰 {name} TP1 익절: {pnl_pct:+.1f}% (50% 매도)")
+                        print(f"   💰 {name} TP1 익절: {pnl_pct:+.1f}% ≥ {regime_tp1}% (50% 매도, {regime_info['regime']})")
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
 
@@ -2469,13 +2486,21 @@ def main():
                     r["close_reason"] = "TRAILING_STOP"
                     print(f"   📈 {name} 트레일링 익절: 고점 {high_pnl:+.1f}% → 현재 {pnl_pct:+.1f}% (콜백 {high_pnl-pnl_pct:.1f}%)")
 
+            # v5.39: 레짐별 RSI 과매수 익절 — 시장 상황에 따라 매도 기준 변동
+            if r["signal"] not in ("CLOSE", "STRONG_CLOSE") and pnl_pct > 0:
+                cur_rsi = r.get("rsi", 50)
+                if cur_rsi >= regime_sell_trigger and hold_hours >= MIN_HOLD_HOURS:
+                    r["signal"] = "CLOSE"
+                    r["close_reason"] = "RSI_SELL"
+                    print(f"   📊 {name} RSI 익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}%")
+
         # CLOSE 신호: 미보유 시 HOLD
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
             r["signal"] = "HOLD"
 
         # v5.20: 신호 매도 Churn 방지 — 최소 보유시간 + 최소 PnL 기준
         if r["signal"] == "CLOSE" and ticker in portfolio:
-            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "CATASTROPHIC_STOP", "TIME_STOP", "TRAILING_STOP", "BREAKEVEN_STOP", "ORPHAN_POSITION"):
+            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "CATASTROPHIC_STOP", "TIME_STOP", "TRAILING_STOP", "BREAKEVEN_STOP", "RSI_SELL", "ORPHAN_POSITION"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 entry_p = portfolio[ticker].get("entry_price", 0)
                 sig_pnl = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
@@ -2537,12 +2562,10 @@ def main():
                     print(f"   \ud83d\udd34 {name} BTC 레짐: BTC={_btc_c/1e6:.1f}M <= {BTC_REGIME_MA_PERIOD}MA={_btc_ma/1e6:.1f}M")
                     continue
 
-            # v5.39: 레짐별 동적 포지션 수 제한 (하락장 방어)
+            # v4.0: 포지션 수 제한 (동시 보유 MAX_CONCURRENT_POSITIONS)
             current_positions = len([k for k in portfolio if k not in ("_meta", "_sell_memory")])
-            regime_max = get_regime_max_concurrent(regime_info["regime"])
-            effective_max = min(MAX_CONCURRENT_POSITIONS, regime_max)
-            if current_positions >= effective_max and ticker not in portfolio:
-                print(f"   🚫 {name} 포지션 한도: {current_positions}/{effective_max}종목 ({regime_info['regime']})")
+            if current_positions >= MAX_CONCURRENT_POSITIONS and ticker not in portfolio:
+                print(f"   🚫 {name} 포지션 한도: {current_positions}/{MAX_CONCURRENT_POSITIONS}종목 보유 중")
                 continue
 
             # v4.1: 거래대금 필터 — 유동성 부족 종목 차단
