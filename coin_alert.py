@@ -2300,10 +2300,15 @@ def main():
         )
         results.append(r)
         name = ticker.replace("KRW-", "")
-        print(f"   {name}: {r['signal']} (앙상블:{r['ensemble_score']:+.1f} 신뢰:{r['confidence']}/100 "
-              f"RSI:{r['rsi']:.0f} ADX:{r['adx']:.0f} 진입:{r.get('entry_score', 0)}점 모멘텀:{r.get('momentum_pred_score', 0):+.0f})")
-        print(f"      손절:{_fmt_krw(r['stop_loss'])} 익절:{_fmt_krw(r['take_profit'])} "
-              f"Sharpe:{r['backtest']['sharpe']:.1f}")
+        _es = r.get('ensemble_score', 0)
+        _conf = r.get('confidence', 0)
+        _rsi = r.get('rsi', 0)
+        _adx = r.get('adx', 0)
+        print(f"   {name}: {r['signal']} (앙상블:{_es:+.1f} 신뢰:{_conf}/100 "
+              f"RSI:{_rsi:.0f} ADX:{_adx:.0f} 진입:{r.get('entry_score', 0)}점 모멘텀:{r.get('momentum_pred_score', 0):+.0f})")
+        _bt = r.get('backtest', {})
+        print(f"      손절:{_fmt_krw(r.get('stop_loss', 0))} 익절:{_fmt_krw(r.get('take_profit', 0))} "
+              f"Sharpe:{_bt.get('sharpe', 0):.1f}")
 
     # v5.2: 고아 포지션 매도 체크 — TICKERS에서 제거됐지만 아직 보유 중인 종목
     orphan_tickers = [t for t in portfolio if t not in ("_meta", "_sell_memory") and t not in TICKERS]
