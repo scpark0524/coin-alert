@@ -1,5 +1,11 @@
 """
-🪙 Coin Alert System v5.39 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.40 — Upbit KRW 자동매매
+
+v5.40: RSI_SELL 분할매도 대원칙 준수 (2026-03-20)
+- [CRITICAL] RSI_SELL이 TP1 미만(+0.6%~+1.28%)에서 전량매도 → 분할매도 기회 박탈 버그 수정
+- [수정] RSI_SELL 최소 PnL: pnl>0 → pnl>=regime_tp1 (TP1 이상일 때만 발동)
+- [수정] RSI_SELL tp_level==0: 전량매도 → TP1처럼 50% 분할매도 (대원칙4 준수)
+- [수정] RSI_SELL tp_level>=1: 기존대로 전량매도 허용
 
 v5.39: 시장추종 구조 개선 — 레짐별 적응형 스코어링 + R:R 정상화 (2026-03-19)
 - [핵심] get_regime_scoring() — 레짐별 RSI 매수기준/매도기준/TP1/진입점수 동적 적용
@@ -1055,7 +1061,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.20"
+        meta["version"] = "5.40"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -2491,13 +2497,41 @@ def main():
                     r["close_reason"] = "TRAILING_STOP"
                     print(f"   📈 {name} 트레일링 익절: 고점 {high_pnl:+.1f}% → 현재 {pnl_pct:+.1f}% (콜백 {high_pnl-pnl_pct:.1f}%)")
 
-            # v5.39: 레짐별 RSI 과매수 익절 — 시장 상황에 따라 매도 기준 변동
-            if r["signal"] not in ("CLOSE", "STRONG_CLOSE") and pnl_pct > 0:
+            # v5.40: 레짐별 RSI 과매수 익절 — 분할매도 대원칙 준수
+            # TP1 미달(pnl < regime_tp1) 시 전량매도 금지, TP1 분할매도 기회 보장
+            # tp_level==0이면 TP1처럼 50% 분할매도, tp_level>=1이면 전량매도 허용
+            if r["signal"] not in ("CLOSE", "STRONG_CLOSE") and pnl_pct >= regime_tp1:
                 cur_rsi = r.get("rsi", 50)
                 if cur_rsi >= regime_sell_trigger and hold_hours >= MIN_HOLD_HOURS:
-                    r["signal"] = "CLOSE"
-                    r["close_reason"] = "RSI_SELL"
-                    print(f"   📊 {name} RSI 익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}%")
+                    if tp_level >= 1:
+                        # TP1 이미 완료 → 전량매도 OK
+                        r["signal"] = "CLOSE"
+                        r["close_reason"] = "RSI_SELL"
+                        print(f"   📊 {name} RSI 익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}% (전량)")
+                    else:
+                        # tp_level==0: TP1 미완료 → 50% 분할매도 (대원칙: 분할매도 우선)
+                        vol = pos.get("volume", 0)
+                        sell_vol = vol * PARTIAL_SELL_RATIO_1
+                        if can_trade and sell_vol > 0:
+                            order = execute_sell(ticker, sell_vol)
+                            if order:
+                                record_order(order_log, ticker, "SELL")
+                                record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "RSI_SELL_TP1", entry_p, pnl_pct)
+                                pos["tp_level"] = 1
+                                pos["partial_taken"] = True
+                                pos["volume"] = vol - sell_vol
+                                signal_fired = True
+                                sold_value = sell_vol * r["price"]
+                                total_exposure = max(0, total_exposure - sold_value / total_capital)
+                                capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
+                                send_telegram(
+                                    f"📊 <b>{name}</b> RSI 분할익절 ({PARTIAL_SELL_RATIO_1*100:.0f}%)\n"
+                                    f"RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']})\n"
+                                    f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
+                                    f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
+                                print(f"   📊 {name} RSI 분할익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}% (50% 매도)")
+                        elif not can_trade:
+                            print(f"   📊 {name} RSI 과매수 감지 (PnL {pnl_pct:+.1f}%, 자동매매 비활성)")
 
         # CLOSE 신호: 미보유 시 HOLD
         if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker not in portfolio:
