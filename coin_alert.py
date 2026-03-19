@@ -1,5 +1,12 @@
 """
-🪙 Coin Alert System v5.38 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.39 — Upbit KRW 자동매매
+
+v5.39: 시장추종 구조 개선 — 레짐별 동적 슬롯 + R:R 정상화 (2026-03-19)
+- [구조] 레짐별 동적 MAX_CONCURRENT: BEAR 4 / MILD_BEAR 6 / SIDEWAYS 8 / MILD_BULL 10 / BULL 12
+- [구조] TP1_BREAKEVEN_SL 실제 구현 — TP1 후 잔여 포지션 SL을 진입가로 이동
+- [R:R] LOSS_CUT_PCT 5→4% (R:R 0.3→0.38, 필요승률 77→72%)
+- [DCA] DCA_DROP_PCT 3→5% (충분히 더 떨어진 뒤 물타기, DCA→SL 패턴 차단)
+- [진입] MIN_ENTRY_SCORE 5→6, BB_STD 1.3→1.6 (241종목 선택 우위 활용)
 
 v5.38: Quick Fix 적용 (2026-03-19)
 - [Quick Fix] RSI 매수 윈도우 축소 — RSI_BUY_CEILING 55→45
@@ -338,7 +345,7 @@ MACD_FAST           = 8
 MACD_SLOW           = 21
 MACD_SIGNAL         = 5
 BB_PERIOD           = 15
-BB_STD              = 1.3      # v5.6: 1.5→1.3 (BB 하단 접촉 빈도 +40%, 진입 기회 확대)
+BB_STD              = 1.6      # v5.39: 1.3→1.6 (241종목 선택 우위 — 진짜 극단치만 매수)
                                # 근거: 1.5σ는 MIN_ENTRY_SCORE 6과 결합 시 진입 마비 유발
                                # 1.3σ 반등 성공률 ~60% (1.5σ 65% 대비 -5%p, 1.2σ 52% 대비 +8%p)
                                # MIN_ENTRY_SCORE 5 + RSI 40 + BB 1.3σ = 복합 품질 유지
@@ -359,7 +366,7 @@ PRICE_CHANGE_THRESHOLD = 3.0   # v4.5: 5.0→3.0 (1h봉에서 5% 변동은 상�
                                # 대형 코인(BTC/ETH) 1h 평균 변동 1.5~2.5% → 3%는 평균+1σ 수준
 
 # 스코어링 시스템 (v4.2 신설)
-MIN_ENTRY_SCORE     = 5        # v5.14: 4→5 (단일지표 진입 차단 — RSI(3)+BB(2) 복합 필수)
+MIN_ENTRY_SCORE     = 6        # v5.39: 5→6 (241종목 선택 우위 — RSI(3)+BB(2)+1추가 필수)
                                # 근거: 4점은 RSI(3)+ADX_low(1)로 사실상 RSI 단독 트리거
                                # v5.13 실전: 4점 진입 7건 중 완결 1건 수수료 손실 → 품질 부족
                                # 5점 = RSI 과매도
@@ -443,11 +450,11 @@ PARTIAL_SELL_RATIO_2 = 0.6      # v5.20.1: TP2에서 잔여의 60% 매도 (전�
                                 # TP1 후 잔여 50% × 60% = 30% 매도
                                 # TP3용 잔여 20% 유지
                                 # 대원칙1 "수익 실현이 최우선" — 단계별 확정 비중 분산
-LOSS_CUT_PCT         = 5.0      # v5.20: 6.0→5.0% (4%/6% 절충 — 노이즈 SL 방지 + 손실 제한)
-                                # 근거: 5% = 2.5σ(일일SL확률5~8%), CATASTROPHIC(10%)까지 5%p 간격
-                                # DCA(-3%) 후 평균가 기준 ~3.5% 여유, 반등 관찰 2~3캔들
-                                # 6%는 너무 넓어 실질 손실 과다, 4%는 노이즈에 취약
-                                # 대원칙2 "손절은 최후의 수단" — 5%로 적정 호흡 확보
+LOSS_CUT_PCT         = 4.0      # v5.39: 5→4% (R:R 정상화 — TP1 3% vs SL 4%, R:R 0.38)
+                                # 근거: SL 5% vs TP1 3% = R:R 0.3 → 승률 77% 필요 (비현실적)
+                                # SL 4% = R:R 0.38, 필요승률 72% (진입필터 강화로 달성 가능)
+                                # DCA(-5%) 후 평균가 기준 ~2.0% 여유, 반등 관찰 1~2캔들
+                                # 대원칙2 "손절은 최후의 수단" — 좁은 SL + 높은 진입 품질로 보완
 CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 미발동 구간)
                                 # 근거: 10% = SL(-4%) 대비 2.5배, 갭다운 슬리피지 포함 커버
                                 # SAHARA 교훈: -100% 도달 전 -10%에서 차단했으면 손실 1/10
@@ -497,10 +504,11 @@ INITIAL_BUY_RATIO      = 0.6     # v5.17 신설: 첫 매수 시 포지션의 60%
                                  # 60% 진입 후 가격 하락 → DCA로 나머지 40% 저가 매수, 평단 개선
                                  # 대원칙3 "충분히 떨어졌을 때만 진입" — 분할로 추격 리스크 분산
 DCA_ENABLED            = True    # v4.0: 분할매수 활성화
-DCA_DROP_PCT           = 3.0     # v5.0: 2.5→3.0% (SL 4% 대비 DCA→SL 간격 확보)
-                                 # 근거: SL 4%에서 DCA 2.5% = 1.5%p 간격 → 노이즈 SL 트리거
-                                 # 3.0% DCA → 평균가 기준 SL까지 ~2.0%p, 반등 관찰 1~2캔들 확보
-                                 # 대원칙3 "충분히 떨어졌을 때만 진입" — DCA도 추격 금지
+DCA_DROP_PCT           = 5.0     # v5.39: 3→5% (충분히 더 떨어진 뒤 물타기 — DCA→SL 패턴 차단)
+                                 # 근거: 3% DCA 후 SL 4% = 1%p 간격 → 즉시 SL, 손실 확대
+                                 # 5% DCA → 평균가 기준 SL까지 ~2.5%p, 진짜 바닥 반등 시에만
+                                 # 48h 실적: DCA 9건 중 4건 SL → DCA가 손실 확대 주범
+                                 # 대원칙3 "충분히 떨어졌을 때만 진입" — DCA 트리거도 엄격하게
 DCA_MAX_ADDS           = 1       # v4.7: 2→1회 (실전: 2회 DCA 시 총 노출 200%, 실질 DD -12.5%)
                                  # 근거: 1회 DCA = 총 150% 노출, 실질 최대 DD -7.5%로 제한
                                  # 하락 추세에서 3레이어 동시 손실 방지 (대원칙2 준수)
@@ -1490,6 +1498,18 @@ def get_regime_threshold(r):
     }.get(r, SIGNAL_THRESHOLD)
 
 
+def get_regime_max_concurrent(r):
+    """v5.39: 레짐별 동적 슬롯 상한 — 하락장 방어, 상승장 확대"""
+    return {
+        "BULL":      12,
+        "MILD_BULL": 10,
+        "SIDEWAYS":  8,
+        "MILD_BEAR": 6,
+        "BEAR":      4,
+        "VOLATILE":  6,
+    }.get(r, 8)
+
+
 def get_regime_strategy_weights(r):
     """v4.0: 평균회귀 중심 3-전략 가중치 (breakout 제거)"""
     return {
@@ -1698,6 +1718,9 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
                 exit_price  = next_open * (1 - cost_pct)
             elif pos["high_pnl"] >= TRAILING_ACTIVATE_PCT and (pos["high_pnl"] - pnl_pct) >= TRAILING_CALLBACK_PCT:
                 exit_reason = "TRAILING_STOP"
+                exit_price  = cp * (1 - cost_pct)
+            elif tp_level >= 1 and TP1_BREAKEVEN_SL and pnl_pct <= 0:
+                exit_reason = "BREAKEVEN_STOP"
                 exit_price  = cp * (1 - cost_pct)
             elif pnl_pct <= -LOSS_CUT_PCT:
                 exit_reason = "STOP_LOSS"
@@ -2187,7 +2210,8 @@ def main():
     print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
     print(f"   분할익절: TP1 +{PROFIT_TARGET_1ST}%({PARTIAL_SELL_RATIO_1*100:.0f}%) → TP2 +{PROFIT_TARGET_2ND}%({PARTIAL_SELL_RATIO_2*100:.0f}%) → TP3 +{PROFIT_TARGET_3RD}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
-    print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
+    _regime_max = get_regime_max_concurrent(regime_info["regime"])
+    print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 슬롯: {_regime_max}개({regime_info['regime']}) | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
     print(f"{'='*60}\n")
@@ -2423,7 +2447,12 @@ def main():
                 r["close_reason"] = "TIME_STOP"
                 print(f"   ⏰ {name} 시간 스탑: {hold_days:.1f}일 ≥ {MAX_HOLD_DAYS}일")
 
+            # v5.39: TP1_BREAKEVEN_SL — TP1 후 잔여 포지션은 진입가가 손절선
             # v5.31: 고정 손절 — TIME_STOP/TRAILING 이후 최후의 수단 (손절최소화 대원칙)
+            elif tp_level >= 1 and TP1_BREAKEVEN_SL and pnl_pct <= 0 and hold_hours >= MIN_HOLD_HOURS:
+                r["signal"] = "CLOSE"
+                r["close_reason"] = "BREAKEVEN_STOP"
+                print(f"   🛡️ {name} 브레이크이븐 손절: TP1 후 {pnl_pct:+.1f}% ≤ 0% (진입가 이탈)")
             elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "STOP_LOSS"
@@ -2446,7 +2475,7 @@ def main():
 
         # v5.20: 신호 매도 Churn 방지 — 최소 보유시간 + 최소 PnL 기준
         if r["signal"] == "CLOSE" and ticker in portfolio:
-            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "CATASTROPHIC_STOP", "TIME_STOP", "TRAILING_STOP", "ORPHAN_POSITION"):
+            if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "CATASTROPHIC_STOP", "TIME_STOP", "TRAILING_STOP", "BREAKEVEN_STOP", "ORPHAN_POSITION"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 entry_p = portfolio[ticker].get("entry_price", 0)
                 sig_pnl = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
@@ -2508,10 +2537,12 @@ def main():
                     print(f"   \ud83d\udd34 {name} BTC 레짐: BTC={_btc_c/1e6:.1f}M <= {BTC_REGIME_MA_PERIOD}MA={_btc_ma/1e6:.1f}M")
                     continue
 
-            # v4.0: 포지션 수 제한 (동시 보유 MAX_CONCURRENT_POSITIONS)
+            # v5.39: 레짐별 동적 포지션 수 제한 (하락장 방어)
             current_positions = len([k for k in portfolio if k not in ("_meta", "_sell_memory")])
-            if current_positions >= MAX_CONCURRENT_POSITIONS and ticker not in portfolio:
-                print(f"   🚫 {name} 포지션 한도: {current_positions}/{MAX_CONCURRENT_POSITIONS}종목 보유 중")
+            regime_max = get_regime_max_concurrent(regime_info["regime"])
+            effective_max = min(MAX_CONCURRENT_POSITIONS, regime_max)
+            if current_positions >= effective_max and ticker not in portfolio:
+                print(f"   🚫 {name} 포지션 한도: {current_positions}/{effective_max}종목 ({regime_info['regime']})")
                 continue
 
             # v4.1: 거래대금 필터 — 유동성 부족 종목 차단
