@@ -2222,8 +2222,6 @@ def main():
     print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
     print(f"   분할익절: TP1 +{PROFIT_TARGET_1ST}%({PARTIAL_SELL_RATIO_1*100:.0f}%) → TP2 +{PROFIT_TARGET_2ND}%({PARTIAL_SELL_RATIO_2*100:.0f}%) → TP3 +{PROFIT_TARGET_3RD}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
-    _rs = get_regime_scoring(regime_info["regime"])
-    print(f"   레짐 스코어링({regime_info['regime']}): RSI매수≤{_rs['rsi_3pt']}/{_rs['rsi_1pt']} | 진입≥{_rs['min_entry']}점 | TP1 {_rs['tp1_pct']}% | RSI매도≥{_rs['sell_trigger']}")
     print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
@@ -2250,9 +2248,11 @@ def main():
     regime_weights = get_regime_strategy_weights(regime_info["regime"])
     threshold      = get_regime_threshold(regime_info["regime"])
 
+    _rs = get_regime_scoring(regime_info["regime"])
     print(f"🌍 시장 레짐(BTC): {get_regime_emoji(regime_info['regime'])} "
           f"| ADX:{regime_info['adx']:.1f} | 변동성:{regime_info['vol_20']:.1f}% "
           f"| 임계값:{threshold}")
+    print(f"   레짐 스코어링({regime_info['regime']}): RSI매수≤{_rs['rsi_3pt']}/{_rs['rsi_1pt']} | 진입≥{_rs['min_entry']}점 | TP1 {_rs['tp1_pct']}% | RSI매도≥{_rs['sell_trigger']}")
 
     # 포트폴리오 동기화
     portfolio = sync_portfolio_with_upbit(load_portfolio()) if AUTO_TRADE_ENABLED else load_portfolio()
