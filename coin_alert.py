@@ -2590,7 +2590,7 @@ def main():
             r["signal"] = "HOLD"
 
         # v5.20: 신호 매도 Churn 방지 — 최소 보유시간 + 최소 PnL 기준
-        if r["signal"] == "CLOSE" and ticker in portfolio:
+        if r["signal"] in ["CLOSE", "STRONG_CLOSE"] and ticker in portfolio:
             if r.get("close_reason") not in ("PROFIT_TARGET", "STOP_LOSS", "CATASTROPHIC_STOP", "TIME_STOP", "TRAILING_STOP", "BREAKEVEN_STOP", "RSI_SELL", "ORPHAN_POSITION"):
                 entry_date_str = portfolio[ticker].get("entry_date")
                 entry_p = portfolio[ticker].get("entry_price", 0)
