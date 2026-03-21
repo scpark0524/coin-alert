@@ -1,5 +1,9 @@
 """
-🪙 Coin Alert System v5.45 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.46 — Upbit KRW 자동매매
+
+v5.46: STRONG_CLOSE 신호매도 가드 누락 수정 (2026-03-22)
+- [BUG] SIGNAL 매도 가드가 CLOSE에만 적용, STRONG_CLOSE 우회 → 저수익 매도 발생
+- [수정] STRONG_CLOSE에도 동일 가드(MIN_SIGNAL_EXIT_PNL, 보유시간, 손실차단) 적용
 
 v5.45: 투자위험(caution) 종목 매수 차단 (2026-03-21)
 - [안전] GLOBAL_PRICE_DIFFERENCES(해외괴리) 종목 제외 — 급증 후 24h 전패, 평균 -9.6%
@@ -1109,7 +1113,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.44"
+        meta["version"] = "5.46"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
