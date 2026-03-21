@@ -1,5 +1,24 @@
 """
-🪙 Coin Alert System v5.40 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.44 — Upbit KRW 자동매매
+
+v5.44: DCA 전/후 SL 분리 — 손절 정밀화 (2026-03-21)
+- [핵심] DCA 미발동: SL -5% (진입가 기준) / DCA 발동 후: SL -4% (평균단가 기준)
+- [신설] LOSS_CUT_PCT_DCA = 4% (DCA 후 전용 SL)
+- [근거] 5일 시뮬레이션 5건 평균 -4.9%→-4.0%, 건당 1%p 손실 절감
+- [원칙] DCA 5% 유지(의미없는 물타기 방지) + DCA 후 타이트 SL(손절최소화 대원칙2)
+
+v5.43: Quick Fix 적용 (2026-03-21)
+- [Quick Fix] LOSS_CUT_PCT 4→5 (F1+F2 해소)
+
+v5.42: Quick Fix 적용 (2026-03-21)
+- [Quick Fix] 버전 업데이트 v5.40→v5.41
+
+v5.41: DCA/SL 역전 해소 + BEAR R:R 개선 (2026-03-21)
+- [CRITICAL] DCA_DROP_PCT 5→3% / LOSS_CUT_PCT 4→5% (F1: DCA 영구 비활성 해소)
+- [CRITICAL] BEAR TP1 2→3% (F3: R:R 0.5:1→0.6:1, DCA 실효 1.10:1)
+- [구조] DCA-SL 간격 2%p 확보 → DCA 100% 활성화 보장 (SL 도달 전 반드시 DCA 발동)
+- [R:R] BULL 실효 R:R: 0.90:1→1.37:1, BEAR 실효 R:R: 0.43:1→1.10:1
+- [근거] 3인 전원 합의 CRITICAL 항목 F1/F3 즉시 해소
 
 v5.40: RSI_SELL 분할매도 대원칙 준수 (2026-03-20)
 - [CRITICAL] RSI_SELL이 TP1 미만(+0.6%~+1.28%)에서 전량매도 → 분할매도 기회 박탈 버그 수정
@@ -459,7 +478,11 @@ PARTIAL_SELL_RATIO_2 = 0.6      # v5.20.1: TP2에서 잔여의 60% 매도 (전�
                                 # TP1 후 잔여 50% × 60% = 30% 매도
                                 # TP3용 잔여 20% 유지
                                 # 대원칙1 "수익 실현이 최우선" — 단계별 확정 비중 분산
-LOSS_CUT_PCT         = 4.0      # v5.39: 5→4% (R:R 정상화 — TP1 3% vs SL 4%, R:R 0.38)
+LOSS_CUT_PCT        = 5        # v5.44: DCA 미발동 시 SL (진입가 기준 -5%)
+                               # 코인 일간 변동 3~5% → 5%는 노이즈 SL 방지 + DCA 기회 보장
+LOSS_CUT_PCT_DCA    = 4        # v5.44: DCA 발동 후 SL (DCA 평균단가 기준 -4%)
+                               # DCA로 평단 하락 → 좁은 SL로 손실 최소화 (대원칙2)
+                               # 시뮬레이션: 5건 평균 -4.9% → -4.0%, 건당 1%p 손실 절감
                                 # 근거: SL 5% vs TP1 3% = R:R 0.3 → 승률 77% 필요 (비현실적)
                                 # SL 4% = R:R 0.38, 필요승률 72% (진입필터 강화로 달성 가능)
                                 # DCA(-5%) 후 평균가 기준 ~2.0% 여유, 반등 관찰 1~2캔들
@@ -1061,7 +1084,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.40"
+        meta["version"] = "5.44"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -2225,7 +2248,7 @@ def main():
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
-    print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: -{LOSS_CUT_PCT}%")
+    print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: DCA전 -{LOSS_CUT_PCT}% / DCA후 -{LOSS_CUT_PCT_DCA}%")
     print(f"   분할익절: TP1 +{PROFIT_TARGET_1ST}%({PARTIAL_SELL_RATIO_1*100:.0f}%) → TP2 +{PROFIT_TARGET_2ND}%({PARTIAL_SELL_RATIO_2*100:.0f}%) → TP3 +{PROFIT_TARGET_3RD}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
     print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
@@ -2481,10 +2504,14 @@ def main():
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "BREAKEVEN_STOP"
                 print(f"   🛡️ {name} 브레이크이븐 손절: TP1 후 {pnl_pct:+.1f}% ≤ 0% (진입가 이탈)")
-            elif pnl_pct <= -LOSS_CUT_PCT and hold_hours >= MIN_HOLD_HOURS:
-                r["signal"] = "CLOSE"
-                r["close_reason"] = "STOP_LOSS"
-                print(f"   🛡️ {name} 손절: {pnl_pct:+.1f}% ≤ -{LOSS_CUT_PCT}%")
+            # v5.44: DCA 여부에 따른 SL 분리 — DCA 미발동 -5%, DCA 후 -4% (평균단가 기준)
+            elif hold_hours >= MIN_HOLD_HOURS:
+                sl_pct = LOSS_CUT_PCT_DCA if pos.get("dca_count", 0) > 0 else LOSS_CUT_PCT
+                if pnl_pct <= -sl_pct:
+                    r["signal"] = "CLOSE"
+                    r["close_reason"] = "STOP_LOSS"
+                    sl_label = f"DCA평단-{sl_pct}%" if pos.get("dca_count", 0) > 0 else f"-{sl_pct}%"
+                    print(f"   🛡️ {name} 손절: {pnl_pct:+.1f}% ≤ -{sl_pct}% ({sl_label})")
             elif pnl_pct <= -LOSS_CUT_PCT:
                 print(f"   ⏳ {name} 손절 유예 (보유 {hold_hours:.1f}h < {MIN_HOLD_HOURS}h)")
 
