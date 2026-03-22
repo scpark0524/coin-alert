@@ -138,9 +138,11 @@ def train():
     print("=" * 60)
 
     trades = fetch_trade_data()
-    sells = [t for t in trades if t.get("side", "SELL") in ("SELL", "PARTIAL_SELL") or "score" in t]
+    all_sells = [t for t in trades if t.get("side", "SELL") in ("SELL", "PARTIAL_SELL") or "score" in t]
+    # 소급 데이터 제외: RSI/앙상블점수가 0인 건은 학습에서 제외 (통계용으로만 유지)
+    sells = [t for t in all_sells if t.get("entry_rsi", 0) != 0 or t.get("entry_score", 0) != 0]
 
-    print(f"\n총 매매 데이터: {len(sells)}건")
+    print(f"\n총 매매 데이터: {len(all_sells)}건 (소급 제외 학습용: {len(sells)}건)")
 
     if len(sells) < MIN_SAMPLES:
         print(f"최소 {MIN_SAMPLES}건 필요 (현재 {len(sells)}건)")
