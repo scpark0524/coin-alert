@@ -2572,6 +2572,7 @@ def main():
                     if pnl_pct <= -sl1_pct:
                         vol = pos.get("volume", 0)
                         sell_vol = vol * PARTIAL_SL_RATIO
+                        partial_sl1_done = False
                         if can_trade and sell_vol > 0:
                             order = execute_sell(ticker, sell_vol)
                             if order:
@@ -2580,6 +2581,7 @@ def main():
                                 pos["sl_partial_done"] = True
                                 pos["volume"] = vol - sell_vol
                                 signal_fired = True
+                                partial_sl1_done = True
                                 sold_value = sell_vol * r["price"]
                                 total_exposure = max(0, total_exposure - sold_value / total_capital)
                                 capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
@@ -2589,8 +2591,15 @@ def main():
                                     f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}\n"
                                     f"반등 대기 → SL2 -{PARTIAL_SL_2ND_PCT}%")
                                 print(f"   🛡️ {name} 분할손절 1단계: {pnl_pct:+.1f}% ≤ -{sl1_pct}% ({PARTIAL_SL_RATIO*100:.0f}% 매도, 잔여 대기)")
+                            else:
+                                print(f"   ⚠️ {name} 분할손절 1단계 주문 실패 → 전량 SL 전환")
                         elif not can_trade:
                             print(f"   🛡️ {name} 분할손절 1단계 감지 ({pnl_pct:+.1f}%, 자동매매 비활성)")
+                        # v5.48 fix: 분할SL1 실패 시 전량 SL fallback (SL 미발동 방지)
+                        if not partial_sl1_done and pnl_pct <= -sl_pct:
+                            r["signal"] = "CLOSE"
+                            r["close_reason"] = "STOP_LOSS"
+                            print(f"   🛡️ {name} 전량손절 (분할SL 실패 fallback): {pnl_pct:+.1f}% ≤ -{sl_pct}%")
 
                 elif PARTIAL_SL_ENABLED and sl_partial_done:
                     # ── 분할 손절 2단계: -6% 도달 시 나머지 전량 매도 ──
