@@ -72,18 +72,18 @@ def fetch_trade_data():
     return []
 
 
-def _calc_score(reason, pnl_pct):
-    """매도 사유별 점수 계산."""
-    score_map = {
-        "PROFIT_TARGET": 3, "PARTIAL_TP2": 2, "TRAILING_STOP": 2,
-        "TP1": 1, "PARTIAL_TP1": 1, "SIGNAL": 1, "RSI_SELL": 1,
-        "BREAKEVEN_STOP": 0, "TIME_STOP": -1, "PARTIAL_SL1": -1,
-        "STOP_LOSS": -2, "CATASTROPHIC_STOP": -3,
-    }
-    s = score_map.get(reason, 0)
-    if reason in ("SIGNAL", "RSI_SELL") and pnl_pct <= 0:
-        s = 0
-    return s
+def _calc_score(reason, pnl_pct, hold_hours=0):
+    """PnL 기반 연속 점수 + 시간 효율 보정 + 노이즈 SL 감점."""
+    score = pnl_pct
+    if hold_hours > 48:
+        score -= min(2.0, (hold_hours - 48) / 48)
+    if reason in ("STOP_LOSS", "PARTIAL_SL1", "CATASTROPHIC_STOP") and hold_hours < 4:
+        score -= 1.5
+    if pnl_pct < -5:
+        score = pnl_pct * 1.5 - (1.5 if hold_hours < 4 else 0)
+    if pnl_pct >= 10:
+        score += 1.0
+    return round(score, 2)
 
 
 def engineer_features(trades):
@@ -117,7 +117,7 @@ def engineer_features(trades):
         ]
 
         X.append(features)
-        y.append(1 if score > 0 else 0)  # 성공(1) / 실패(0)
+        y.append(score)  # 연속 점수 (regression target)
 
     return np.array(X), np.array(y)
 
@@ -129,12 +129,12 @@ FEATURE_NAMES = [
 
 
 def train():
-    """모델 학습 + 저장."""
-    from sklearn.ensemble import GradientBoostingClassifier
-    from sklearn.metrics import accuracy_score, classification_report
+    """모델 학습 + 저장. Regression으로 연속 점수 예측."""
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.metrics import mean_absolute_error, r2_score
 
     print("=" * 60)
-    print("  매매 성공 예측 모델 학습")
+    print("  매매 점수 예측 모델 학습 (Regression)")
     print("=" * 60)
 
     trades = fetch_trade_data()
@@ -155,12 +155,12 @@ def train():
     y_train, y_test = y[:split_idx], y[split_idx:]
 
     print(f"학습: {len(X_train)}건 | 테스트: {len(X_test)}건")
-    print(f"성공 비율: 학습 {y_train.mean():.1%} | 테스트 {y_test.mean():.1%}")
+    print(f"점수 분포: 학습 평균 {y_train.mean():+.2f} | 테스트 평균 {y_test.mean():+.2f}")
 
-    # GradientBoosting (경량, 1GB RAM 호환)
-    model = GradientBoostingClassifier(
-        n_estimators=50,      # 적은 트리 수 (과적합 방지 + 메모리 절약)
-        max_depth=3,          # 얕은 트리 (일반화)
+    # GradientBoosting Regressor (연속 점수 예측)
+    model = GradientBoostingRegressor(
+        n_estimators=50,
+        max_depth=3,
         learning_rate=0.1,
         min_samples_leaf=5,
         subsample=0.8,
@@ -171,15 +171,27 @@ def train():
 
     # 평가
     y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)[:, 1]
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+
+    # 방향 정확도 (예측 부호 == 실제 부호)
+    direction_acc = np.mean((y_pred > 0) == (y_test > 0))
 
     print(f"\n{'─' * 40}")
-    print(f"정확도: {accuracy_score(y_test, y_pred):.1%}")
-    print(f"\n{classification_report(y_test, y_pred, target_names=['실패', '성공'])}")
+    print(f"MAE (평균 절대 오차): {mae:.2f}")
+    print(f"R2 Score: {r2:.3f}")
+    print(f"방향 정확도 (수익/손실 맞춤): {direction_acc:.1%}")
+
+    # 임계값별 정밀도
+    for threshold in [0.0, 0.5, 1.0]:
+        pred_buy = y_pred > threshold
+        if pred_buy.sum() > 0:
+            actual_success = y_test[pred_buy].mean()
+            print(f"  예측점수 > {threshold}: {pred_buy.sum()}건 중 실제 평균 {actual_success:+.2f}")
 
     # 피처 중요도
     importances = model.feature_importances_
-    print(f"{'─' * 40}")
+    print(f"\n{'─' * 40}")
     print("피처 중요도:")
     for name, imp in sorted(zip(FEATURE_NAMES, importances), key=lambda x: -x[1]):
         bar = "█" * int(imp * 50)
@@ -190,31 +202,34 @@ def train():
         "model": model,
         "feature_names": FEATURE_NAMES,
         "train_size": len(X_train),
-        "test_accuracy": float(accuracy_score(y_test, y_pred)),
+        "test_mae": float(mae),
+        "test_r2": float(r2),
+        "test_direction_acc": float(direction_acc),
         "trained_at": datetime.utcnow().isoformat(),
-        "version": "1.0",
+        "version": "2.0",
+        "type": "regressor",
     }
 
     with open(MODEL_FILE, "wb") as f:
         pickle.dump(model_data, f)
 
     print(f"\n모델 저장: {MODEL_FILE}")
-    print(f"   학습 데이터: {len(X_train)}건 | 정확도: {accuracy_score(y_test, y_pred):.1%}")
+    print(f"   학습: {len(X_train)}건 | MAE: {mae:.2f} | 방향정확도: {direction_acc:.1%}")
     return True
 
 
 def predict(features_dict):
-    """단일 거래에 대한 성공 확률 예측.
+    """단일 거래에 대한 예측 점수 반환.
 
     Args:
         features_dict: {entry_rsi, exit_rsi, entry_score, hold_hours,
                         abs_pnl_pct, btc_change_pct, hour_sin, hour_cos}
 
     Returns:
-        float: 성공 확률 (0.0 ~ 1.0), 모델 없으면 -1
+        float: 예측 점수 (양수=성공 예상, 음수=실패 예상), 모델 없으면 None
     """
     if not os.path.exists(MODEL_FILE):
-        return -1  # 모델 없음 (cold start)
+        return None
 
     try:
         with open(MODEL_FILE, "rb") as f:
@@ -222,10 +237,10 @@ def predict(features_dict):
 
         model = model_data["model"]
         features = [features_dict.get(name, 0) for name in FEATURE_NAMES]
-        prob = model.predict_proba([features])[0][1]
-        return float(prob)
+        score = model.predict([features])[0]
+        return round(float(score), 2)
     except Exception:
-        return -1
+        return None
 
 
 def stats():
@@ -240,7 +255,7 @@ def stats():
     print("=" * 40)
     print("  매매 예측 모델 상태")
     print("=" * 40)
-    print(f"  버전: {model_data.get('version', '?')}")
+    print(f"  버전: {model_data.get('version', '?')} ({model_data.get('type', 'classifier')})")
     print(f"  학습일: {model_data.get('trained_at', '?')}")
     print(f"  학습 데이터: {model_data.get('train_size', '?')}건")
     print(f"  테스트 정확도: {model_data.get('test_accuracy', 0):.1%}")

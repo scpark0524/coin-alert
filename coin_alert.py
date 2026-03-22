@@ -3028,8 +3028,8 @@ def main():
                                     "hour_sin": _math.sin(2 * _math.pi * _hour / 24),
                                     "hour_cos": _math.cos(2 * _math.pi * _hour / 24),
                                 })
-                                if _prob >= 0:
-                                    print(f"   🧠 {name} 성공 확률: {_prob:.0%}")
+                                if _prob is not None:
+                                    print(f"   🧠 {name} ML 예측점수: {_prob:+.2f} ({'양호' if _prob > 0 else '주의'})")
                             except Exception:
                                 pass
                             order = execute_buy(ticker, buy_krw)
