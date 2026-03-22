@@ -11,9 +11,9 @@
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v3.3)
-- 20종목: BTC, ETH, XRP, SOL, DOGE, ADA, AVAX, LINK, DOT, TRX, SUI, BCH, BERA, APT, VIRTUAL, AXL, ONDO, UNI, HBAR, NEAR
-- 신호 생성: 1시간봉 300개 (~12일)
+## 현재 상태 (v5.48)
+- 전종목 자동 스캔 (~241종목, 투자유의/위험 종목 자동 제외)
+- 신호 생성: 1시간봉 450개 (~19일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
 - 레짐 감지: BTC 1시간봉 기준
 
@@ -33,15 +33,14 @@
 - 의존성: pyupbit, pandas, numpy, requests, matplotlib, mplfinance
 - 환경변수: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, INITIAL_CAPITAL
 
-## 주요 파라미터 (v3.3)
-- RSI 9 / MACD 8/21/5 / BB 15/2.0 / ADX 15/20/35 (3단계)
-- ATR_STOP_MULT = 2.0, ATR_TARGET_MULT = 4.0
-- ATR_PARTIAL_TARGET_MULT = 2.0, PARTIAL_SELL_RATIO = 0.5
-- STOP_COOLDOWN_HOURS = 24 (스탑 후 재진입 쿨다운)
-- MIN_HOLD_HOURS = 3 (최소 보유시간, 스탑 유예)
-- SIGNAL_THRESHOLD = 15, MAX_HOLD_DAYS = 7
-- KELLY_FRACTION = 0.25, MAX_PORTFOLIO_EXPOSURE = 0.80
-- DAILY_DD_LIMIT = 0.08, CIRCUIT_BREAKER_DD = 0.15
+## 주요 파라미터 (v5.48)
+- 분할 익절: TP1 +3%(50%) → TP2 +8%(30%) → TP3 +12%(전량)
+- 분할 손절: SL1 -4%(50%) → SL2 -6%(나머지) — v5.48 신설
+- DCA: 진입가 대비 -7% 하락 시 나머지 40% 추가매수 (v5.48: 5→7%)
+- 신호 캔들: 1시간봉 450개 ~19일 (v5.48: 300→450)
+- STOP_COOLDOWN_HOURS = 4 (스탑 후 재진입 쿨다운)
+- MAX_CONCURRENT_POSITIONS = 12, MAX_PORTFOLIO_EXPOSURE = 0.85
+- CIRCUIT_BREAKER_DD = 0.15, DAILY_DD_LIMIT = 0.08
 
 ## 버전 히스토리
 - v1.0: stock-alert v7.6 기반 초기 구현
@@ -51,3 +50,5 @@
 - v3.0: 모멘텀 예측 전략(4번째 전략), 노출 80%, 서킷브레이커 완화, VWAP 완화, 시간 스탑
 - v3.2: 빠른 손절(ATR×2.0) + 24h 쿨다운 → BTC -3.7% 하락장에서 +5.7% 수익
 - v3.3: 최소 보유 3시간, 매도 후 즉시 재매수 허용 (자본 회전 버그 수정)
+- v5.34~v5.46: 전종목 자동 스캔, 분할매수매도, 레짐별 적응형, 투자유의 차단 등
+- v5.48: 분할 손절(SL1 -4%→50%, SL2 -6%→나머지) + DCA 간격 7% + 봉 수 450

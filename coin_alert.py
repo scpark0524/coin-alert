@@ -1,5 +1,12 @@
 """
-🪙 Coin Alert System v5.46 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.48 — Upbit KRW 자동매매
+
+v5.48: 분할 손절 + DCA 간격 확대 + 봉 수 확장 (2026-03-22)
+- [제안A] 분할 손절: SL 1단계(-4%)→50% 매도, SL 2단계(-6%)→나머지 전량 매도
+  근거: 백테스트 SL 평균 손실 -5.83%→-2.68% (54% 감소), 반등 시 나머지 50% 회복 기회
+- [제안D] DCA_DROP_PCT 5→7%: DCA 진입 간격 확대 → DCA-SL 레이스 컨디션 해소
+  근거: 5% DCA 후 즉시 SL 패턴 차단, MDD 2.85%p 개선
+- [제안C] SIGNAL_CANDLES 300→450: 지지/저항 정확도 향상 (~12일→~19일)
 
 v5.46: STRONG_CLOSE 신호매도 가드 누락 수정 (2026-03-22)
 - [BUG] SIGNAL 매도 가드가 CLOSE에만 적용, STRONG_CLOSE 우회 → 저수익 매도 발생
@@ -369,7 +376,7 @@ INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 5_000_000))  # KRW 500�
 
 # 캔들 설정
 SIGNAL_INTERVAL = "minute60"   # 신호 생성용: 1시간봉
-SIGNAL_CANDLES  = 300          # 1시간봉 300개 (~12일)
+SIGNAL_CANDLES  = 450          # 1시간봉 450개 (~19일) — 지지/저항 정확도 향상
 BT_INTERVAL     = "day"        # 백테스트용: 일봉
 BT_CANDLES      = 200          # 일봉 200일
 
@@ -516,6 +523,15 @@ LOSS_CUT_PCT_DCA    = 4        # v5.44: DCA 발동 후 SL (DCA 평균단가 기�
                                 # SL 4% = R:R 0.38, 필요승률 72% (진입필터 강화로 달성 가능)
                                 # DCA(-5%) 후 평균가 기준 ~2.0% 여유, 반등 관찰 1~2캔들
                                 # 대원칙2 "손절은 최후의 수단" — 좁은 SL + 높은 진입 품질로 보완
+# v5.48 신설: 분할 손절 — 수익은 분할매도, 손절도 분할매도 (비대칭 해소)
+PARTIAL_SL_ENABLED     = True   # 분할 손절 활성화
+PARTIAL_SL_1ST_PCT     = 4.0    # SL 1단계: -4% → 50% 매도 (손실 확정 최소화)
+                                # 근거: 기존 전량 SL(-5%) 대비 1단계에서 절반만 확정
+                                # 반등 시 나머지 50%로 손실 회복 기회 확보
+PARTIAL_SL_2ND_PCT     = 6.0    # SL 2단계: -6% → 나머지 전량 매도 (추가 하락 방어)
+                                # 근거: 1단계(-4%) 후 2%p 추가 하락 = 구조적 하락 판단
+PARTIAL_SL_RATIO       = 0.5    # 1단계 매도 비율 (50%)
+                                # 백테스트: SL 평균 -5.83% → -2.68% (54% 감소)
 CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 미발동 구간)
                                 # 근거: 10% = SL(-4%) 대비 2.5배, 갭다운 슬리피지 포함 커버
                                 # SAHARA 교훈: -100% 도달 전 -10%에서 차단했으면 손실 1/10
@@ -565,11 +581,11 @@ INITIAL_BUY_RATIO      = 0.6     # v5.17 신설: 첫 매수 시 포지션의 60%
                                  # 60% 진입 후 가격 하락 → DCA로 나머지 40% 저가 매수, 평단 개선
                                  # 대원칙3 "충분히 떨어졌을 때만 진입" — 분할로 추격 리스크 분산
 DCA_ENABLED            = True    # v4.0: 분할매수 활성화
-DCA_DROP_PCT           = 5.0     # v5.39: 3→5% (충분히 더 떨어진 뒤 물타기 — DCA→SL 패턴 차단)
-                                 # 근거: 3% DCA 후 SL 4% = 1%p 간격 → 즉시 SL, 손실 확대
-                                 # 5% DCA → 평균가 기준 SL까지 ~2.5%p, 진짜 바닥 반등 시에만
-                                 # 48h 실적: DCA 9건 중 4건 SL → DCA가 손실 확대 주범
-                                 # 대원칙3 "충분히 떨어졌을 때만 진입" — DCA 트리거도 엄격하게
+DCA_DROP_PCT           = 7.0     # v5.48: 5→7% (DCA-SL 레이스 해소, 백테스트 MDD 2.85%p 개선)
+                                 # 근거: 5% DCA 후 SL 4% = 1%p 간격 → 즉시 SL, 손실 확대
+                                 # 7% DCA → 평균가 기준 SL까지 ~4%p, 진짜 바닥에서만 DCA 실행
+                                 # v5.39 5%에서도 DCA→SL 패턴 지속 → 더 엄격한 간격 필요
+                                 # 대원칙3 "충분히 떨어졌을 때만 진입" — DCA 트리거 최엄격
 DCA_MAX_ADDS           = 1       # v4.7: 2→1회 (실전: 2회 DCA 시 총 노출 200%, 실질 DD -12.5%)
                                  # 근거: 1회 DCA = 총 150% 노출, 실질 최대 DD -7.5%로 제한
                                  # 하락 추세에서 3레이어 동시 손실 방지 (대원칙2 준수)
@@ -1113,7 +1129,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.46"
+        meta["version"] = "5.48"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -1655,7 +1671,7 @@ def strategy_breakout(data, today):
     score = 0
     c = data["Close"]
     p = float(today["Close"])
-    # 코인: 52주 대신 300캔들(~12일 1H 기준) 고점/저점
+    # 코인: 52주 대신 450캔들(~19일 1H 기준) 고점/저점
     c_all = c
     h_max, l_min = float(c_all.max()), float(c_all.min())
     if p >= h_max * 0.98:
@@ -1745,7 +1761,7 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
         if pos is None:
             if total >= current_threshold:
                 entry_price = next_open * (1 + cost_pct)
-                pos = {"entry": entry_price, "idx": i + 1, "partial": False, "tp_level": 0, "high_pnl": 0}
+                pos = {"entry": entry_price, "idx": i + 1, "partial": False, "tp_level": 0, "high_pnl": 0, "sl_partial_done": False}
         else:
             hold_days = i - pos["idx"]
             cp = float(t_bar["Close"])
@@ -1788,7 +1804,17 @@ def quick_backtest(data, rw, btc_data=None, return_trades=False):
             elif tp_level >= 1 and TP1_BREAKEVEN_SL and pnl_pct <= 0:
                 exit_reason = "BREAKEVEN_STOP"
                 exit_price  = cp * (1 - cost_pct)
-            elif pnl_pct <= -LOSS_CUT_PCT:
+            elif PARTIAL_SL_ENABLED and not pos.get("sl_partial_done") and pnl_pct <= -PARTIAL_SL_1ST_PCT:
+                # v5.48: 백테스트 분할 손절 1단계 — 50% 매도
+                remaining_ratio = 1 - PARTIAL_SELL_RATIO_1 if tp_level == 0 else (1 - PARTIAL_SELL_RATIO_1) * (1 - PARTIAL_SELL_RATIO_2 if tp_level >= 2 else 1)
+                partial_pnl = pnl_pct * PARTIAL_SL_RATIO * remaining_ratio
+                trades.append({"pnl": partial_pnl, "days": hold_days, "reason": "PARTIAL_SL1", "entry_idx": pos["idx"]})
+                pos["sl_partial_done"] = True
+            elif PARTIAL_SL_ENABLED and pos.get("sl_partial_done") and pnl_pct <= -PARTIAL_SL_2ND_PCT:
+                # v5.48: 백테스트 분할 손절 2단계 — 나머지 전량 매도
+                exit_reason = "STOP_LOSS"
+                exit_price  = cp * (1 - cost_pct)
+            elif not PARTIAL_SL_ENABLED and pnl_pct <= -LOSS_CUT_PCT:
                 exit_reason = "STOP_LOSS"
                 exit_price  = cp * (1 - cost_pct)
             elif total <= -current_threshold:
@@ -2165,7 +2191,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v5.20</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v5.48</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -2277,7 +2303,8 @@ def main():
     print(f"   {now.strftime('%Y-%m-%d %H:%M:%S')} UTC | 자본: ₩{INITIAL_CAPITAL:,}")
     print(f"   비용: 수수료 {COMMISSION_BPS}bps + 슬리피지 {SLIPPAGE_BPS}bps = 편도 {TOTAL_COST_BPS}bps")
     print(f"   최대 노출: {MAX_PORTFOLIO_EXPOSURE*100:.0f}% | 종목당 상한: {MAX_POSITION_PCT*100:.0f}%")
-    print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | 손절: DCA전 -{LOSS_CUT_PCT}% / DCA후 -{LOSS_CUT_PCT_DCA}%")
+    sl_mode = f"분할SL(-{PARTIAL_SL_1ST_PCT}%→{PARTIAL_SL_RATIO*100:.0f}%, -{PARTIAL_SL_2ND_PCT}%→나머지)" if PARTIAL_SL_ENABLED else f"SL DCA전-{LOSS_CUT_PCT}%/DCA후-{LOSS_CUT_PCT_DCA}%"
+    print(f"   분할매수: 첫진입 {INITIAL_BUY_RATIO*100:.0f}% → DCA -{DCA_DROP_PCT}% 시 나머지 | {sl_mode}")
     print(f"   분할익절: TP1 +{PROFIT_TARGET_1ST}%({PARTIAL_SELL_RATIO_1*100:.0f}%) → TP2 +{PROFIT_TARGET_2ND}%({PARTIAL_SELL_RATIO_2*100:.0f}%) → TP3 +{PROFIT_TARGET_3RD}%(전량) | RSI상한: {RSI_BUY_CEILING}")
     print(f"   트레일링: +{TRAILING_ACTIVATE_PCT}% 활성 → -{TRAILING_CALLBACK_PCT}% 콜백 | 거래대금≥{MIN_VOLUME_24H/1e8:.0f}억")
     print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
@@ -2533,10 +2560,47 @@ def main():
                 r["signal"] = "CLOSE"
                 r["close_reason"] = "BREAKEVEN_STOP"
                 print(f"   🛡️ {name} 브레이크이븐 손절: TP1 후 {pnl_pct:+.1f}% ≤ 0% (진입가 이탈)")
+            # v5.48: 분할 손절 — SL 1단계(-4%)→50% 매도, SL 2단계(-6%)→나머지 전량
             # v5.44: DCA 여부에 따른 SL 분리 — DCA 미발동 -5%, DCA 후 -4% (평균단가 기준)
             elif hold_hours >= MIN_HOLD_HOURS:
                 sl_pct = LOSS_CUT_PCT_DCA if pos.get("dca_count", 0) > 0 else LOSS_CUT_PCT
-                if pnl_pct <= -sl_pct:
+                sl_partial_done = pos.get("sl_partial_done", False)
+
+                if PARTIAL_SL_ENABLED and not sl_partial_done:
+                    # ── 분할 손절 1단계: -4% 도달 시 50% 매도 ──
+                    sl1_pct = LOSS_CUT_PCT_DCA if pos.get("dca_count", 0) > 0 else PARTIAL_SL_1ST_PCT
+                    if pnl_pct <= -sl1_pct:
+                        vol = pos.get("volume", 0)
+                        sell_vol = vol * PARTIAL_SL_RATIO
+                        if can_trade and sell_vol > 0:
+                            order = execute_sell(ticker, sell_vol)
+                            if order:
+                                record_order(order_log, ticker, "SELL")
+                                record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "PARTIAL_SL1", entry_p, pnl_pct)
+                                pos["sl_partial_done"] = True
+                                pos["volume"] = vol - sell_vol
+                                signal_fired = True
+                                sold_value = sell_vol * r["price"]
+                                total_exposure = max(0, total_exposure - sold_value / total_capital)
+                                capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
+                                send_telegram(
+                                    f"🛡️ <b>{name}</b> 분할손절 1단계 ({PARTIAL_SL_RATIO*100:.0f}%)\n"
+                                    f"PnL {pnl_pct:+.1f}% ≤ -{sl1_pct}%\n"
+                                    f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}\n"
+                                    f"반등 대기 → SL2 -{PARTIAL_SL_2ND_PCT}%")
+                                print(f"   🛡️ {name} 분할손절 1단계: {pnl_pct:+.1f}% ≤ -{sl1_pct}% ({PARTIAL_SL_RATIO*100:.0f}% 매도, 잔여 대기)")
+                        elif not can_trade:
+                            print(f"   🛡️ {name} 분할손절 1단계 감지 ({pnl_pct:+.1f}%, 자동매매 비활성)")
+
+                elif PARTIAL_SL_ENABLED and sl_partial_done:
+                    # ── 분할 손절 2단계: -6% 도달 시 나머지 전량 매도 ──
+                    if pnl_pct <= -PARTIAL_SL_2ND_PCT:
+                        r["signal"] = "CLOSE"
+                        r["close_reason"] = "STOP_LOSS"
+                        print(f"   🛡️ {name} 분할손절 2단계: {pnl_pct:+.1f}% ≤ -{PARTIAL_SL_2ND_PCT}% (잔여 전량 매도)")
+
+                elif pnl_pct <= -sl_pct:
+                    # 분할 손절 비활성 시 기존 로직: 전량 매도
                     r["signal"] = "CLOSE"
                     r["close_reason"] = "STOP_LOSS"
                     sl_label = f"DCA평단-{sl_pct}%" if pos.get("dca_count", 0) > 0 else f"-{sl_pct}%"
