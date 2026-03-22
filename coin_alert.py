@@ -2415,6 +2415,16 @@ def main():
     print(f"   신호매도 가드: {MIN_SIGNAL_EXIT_HOURS}h + |PnL|≥{MIN_SIGNAL_EXIT_PNL}% | 최대: {MAX_CONCURRENT_POSITIONS}개 | 서킷: MDD {CIRCUIT_BREAKER_DD*100:.0f}%")
     print(f"   분석 {len(TICKERS)}종목: {', '.join(t.replace('KRW-', '') for t in TICKERS)}")
     print(f"   자동매매: {'✅ 활성' if AUTO_TRADE_ENABLED else '❌ 비활성 (알림만)'}")
+    # v5.49: ML 모델 상태
+    try:
+        from trade_model import predict, MODEL_FILE
+        import os as _os
+        if _os.path.exists(MODEL_FILE):
+            print(f"   🧠 매매 예측 모델: 활성 (trade_model.pkl)")
+        else:
+            print(f"   🧠 매매 예측 모델: 대기 (데이터 축적 중)")
+    except ImportError:
+        pass
     print(f"{'='*60}\n")
 
     # Phase 1: 데이터 & 분석
@@ -3003,6 +3013,25 @@ def main():
                             if buy_krw < 5000:
                                 print(f"   🚨 {name} 매수 차단 (리스크 Level {risk_level}: {risk_label})")
                                 continue
+                            # v5.49: ML 모델 예측 (로깅만, 차단 안 함)
+                            try:
+                                import math as _math
+                                from trade_model import predict as _ml_predict
+                                _hour = utc_now().hour
+                                _prob = _ml_predict({
+                                    "entry_rsi": r.get("rsi", 50),
+                                    "exit_rsi": r.get("rsi", 50),
+                                    "entry_score": r.get("ensemble_score", 0),
+                                    "hold_hours": 0,
+                                    "abs_pnl_pct": 0,
+                                    "btc_change_pct": 0,
+                                    "hour_sin": _math.sin(2 * _math.pi * _hour / 24),
+                                    "hour_cos": _math.cos(2 * _math.pi * _hour / 24),
+                                })
+                                if _prob >= 0:
+                                    print(f"   🧠 {name} 성공 확률: {_prob:.0%}")
+                            except Exception:
+                                pass
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
