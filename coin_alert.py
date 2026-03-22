@@ -2090,6 +2090,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     # v5.39: 레짐별 적응형 진입 스코어링 (시장 상황에 따라 기준 변동)
     regime_scoring = get_regime_scoring(regime_info["regime"])
     entry_score = 0
+    full_percentile = 50.0  # 기본값 (es <= 0일 때도 반환 dict에 포함)
     if es > 0:  # 매수 신호일 때만 스코어링
         # RSI 과매도 가산 (최대 3점) — 레짐별 기준 적용
         rsi_3pt = regime_scoring["rsi_3pt"]  # BEAR:20, SIDEWAYS:30, BULL:40
@@ -2116,7 +2117,6 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
 
         # v5.49: 전체 캔들(450봉) 최저점 반경 매수 필터
         # 실거래 분석: 0~20% 진입 승률 75%, 35%+ 진입 시 SL 집중
-        full_percentile = 50.0  # 기본값
         full_high = float(data["High"].max())
         full_low = float(data["Low"].min())
         if full_high > full_low:
