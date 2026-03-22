@@ -1,5 +1,11 @@
 """
-🪙 Coin Alert System v5.48 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.49 — Upbit KRW 자동매매
+
+v5.49: 최저점 반경 매수 필터 (2026-03-22)
+- [핵심] 전체 캔들(450봉) 백분위 기반 매수 필터 — 레짐별 차등 한도
+  BEAR 15% / MILD_BEAR 20% / SIDEWAYS 25% / MILD_BULL 30% / BULL 35%
+  실거래 분석: 0~20% 진입 승률 75%, 35%+ 진입 SL 집중 → 저점 반경만 매수
+- DOGE 사례: 저점 130, 고점 160, 141원 = 36.7%ile → SIDEWAYS(25%) 기준 차단
 
 v5.48: 분할 손절 + DCA 간격 확대 + 봉 수 확장 + 리스크 모니터 (2026-03-22)
 - [제안A] 분할 손절: SL 1단계(-4%)→50% 매도, SL 2단계(-6%)→나머지 전량 매도
@@ -457,12 +463,21 @@ SR_PROXIMITY        = 0.025    # v4.5: 0.015→0.025 (S/R 자체 오차 ±1~2% �
 
 # v5.14 신설: 24h 가격위치 필터 (고점 추격매수 차단)
 PRICE_PERCENTILE_BLOCK = 70    # 24h 고저 범위 대비 현재가 위치 — N%ile 이상 진입 차단
-                               # 계산: (현재가 - 24h저가) / (24h고가 - 24h저가) × 100
-                               # 근거: TRX 87.5%ile 고점 매수 사고 → 70%ile 이상 차단
-                               # 70%ile = 하단 30% 구간에서만 진입 허용, 반등 시작점 포착
-                               # 스코어링: ≥70%ile 시 -3점 감점 (MIN_ENTRY_SCORE 5 기준 사실상 차단)
-                               # 대원칙3 "추격매수 절대 금지" — 수치화된 고점 게이트
-PRICE_PERCENTILE_PENALTY = 3   # 가격위치 필터 위반 시 스코어 감점 (3점: RSI 가산 무효화)
+PRICE_PERCENTILE_PENALTY = 3   # 가격위치 필터 위반 시 스코어 감점 (3점)
+
+# v5.49 신설: 전체 캔들(450봉) 최저점 반경 매수 필터
+# 실거래 분석: 0~20% 진입 승률 75%, 35~50% 진입 승률 44% (SL 집중)
+# 레짐별 차등: BEAR는 더 엄격(바닥 확인 필요), BULL은 완화(추세 동행)
+ENTRY_PERCENTILE_MAX = {
+    "BEAR":      15,   # 하위 15%만 진입 — 하락장에서는 확실한 바닥만
+    "MILD_BEAR": 20,   # 하위 20% — 보수적 진입
+    "SIDEWAYS":  25,   # 하위 25% — 표준 (실거래 최적 구간)
+    "MILD_BULL": 30,   # 하위 30% — 상승 초기 약간 완화
+    "BULL":      35,   # 하위 35% — 추세장에서는 풀백 매수 허용
+}
+# 계산: (현재가 - 450봉최저가) / (450봉최고가 - 450봉최저가) × 100
+# DOGE 사례: 저점 130, 고점 160, 현재 141 = 36.7% → SIDEWAYS(25%) 기준 차단
+# 133원이면 10% → 모든 레짐에서 매수 허용
 
 # 포지션 사이징 (v4.0: 분산 테스트)
 RISK_BUDGET             = 0.02
@@ -1172,7 +1187,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.48"
+        meta["version"] = "5.49"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -2099,6 +2114,19 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
             if percentile >= PRICE_PERCENTILE_BLOCK:
                 entry_score -= PRICE_PERCENTILE_PENALTY  # 고점 구간 -3점
 
+        # v5.49: 전체 캔들(450봉) 최저점 반경 매수 필터
+        # 실거래 분석: 0~20% 진입 승률 75%, 35%+ 진입 시 SL 집중
+        full_percentile = 50.0  # 기본값
+        full_high = float(data["High"].max())
+        full_low = float(data["Low"].min())
+        if full_high > full_low:
+            full_percentile = (cp - full_low) / (full_high - full_low) * 100
+            regime_pct_max = ENTRY_PERCENTILE_MAX.get(regime_info["regime"], 25)
+            if full_percentile > regime_pct_max:
+                es = 0  # 매수 신호 무효화
+                name = ticker.replace("KRW-", "")
+                print(f"   🚫 {name} 최저점 반경 필터: {full_percentile:.1f}%ile > {regime_pct_max}% ({regime_info['regime']})")
+
         # 스코어 미달 시 매수 차단 — 레짐별 기준 적용
         regime_min_entry = regime_scoring["min_entry"]  # BEAR:7, SIDEWAYS:6, BULL:5
         if entry_score < regime_min_entry:
@@ -2177,6 +2205,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
         "near_support": sr["near_support"], "near_resistance": sr["near_resistance"],
         "trend_score": ts, "mean_rev_score": ms, "breakout_score": bks, "momentum_pred_score": mps,
         "ensemble_score": es, "confidence": conf, "entry_score": entry_score, "vwap": vwap,
+        "full_percentile": round(full_percentile, 1),
         "backtest": bt, "weekly": wk, "position": ps,
         "volume_24h": vol_24h,
     }
