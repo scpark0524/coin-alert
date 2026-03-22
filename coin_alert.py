@@ -2647,6 +2647,12 @@ def main():
                             f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                             f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
                         print(f"   💰 {name} TP1 익절: {pnl_pct:+.1f}% ≥ {regime_tp1}% (50% 매도, {regime_info['regime']})")
+                        _send_trade_analysis_webhook(
+                            ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
+                            "TP1", entry_p, pnl_pct,
+                            extra_data={"hold_hours": hold_hours, "entry_rsi": round(r.get("rsi", 0), 1),
+                                        "exit_rsi": round(r.get("rsi", 0), 1), "entry_score": round(r.get("ensemble_score", 0), 1)}
+                        )
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
 
@@ -2670,6 +2676,12 @@ def main():
                             f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                             f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
                         print(f"   💰 {name} TP2 익절: {pnl_pct:+.1f}% (잔여 50% 매도)")
+                        _send_trade_analysis_webhook(
+                            ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
+                            "TP2", entry_p, pnl_pct,
+                            extra_data={"hold_hours": hold_hours, "entry_rsi": round(r.get("rsi", 0), 1),
+                                        "exit_rsi": round(r.get("rsi", 0), 1), "entry_score": round(r.get("ensemble_score", 0), 1)}
+                        )
                 elif not can_trade:
                     print(f"   💰 {name} TP2 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
 
@@ -2817,6 +2829,12 @@ def main():
                                     f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                                     f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
                                 print(f"   📊 {name} RSI 분할익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}% (50% 매도)")
+                                _send_trade_analysis_webhook(
+                                    ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
+                                    "RSI_SELL_TP1", entry_p, pnl_pct,
+                                    extra_data={"hold_hours": hold_hours, "entry_rsi": round(r.get("rsi", 0), 1),
+                                                "exit_rsi": round(cur_rsi, 1), "entry_score": round(r.get("ensemble_score", 0), 1)}
+                                )
                         elif not can_trade:
                             print(f"   📊 {name} RSI 과매수 감지 (PnL {pnl_pct:+.1f}%, 자동매매 비활성)")
 
