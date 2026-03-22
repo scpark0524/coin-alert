@@ -36,7 +36,7 @@ import numpy as np
 
 MODEL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_model.pkl")
 API_URL = "http://localhost:8000/api/v1/projects/coin-alert/trade-analyses?limit=500"
-MIN_SAMPLES = 100
+MIN_SAMPLES = 30   # 실시간 webhook 데이터(RSI/점수 포함) 30건부터 학습 가능
 
 
 def fetch_trade_data():
