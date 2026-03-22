@@ -1,12 +1,14 @@
 """
 🪙 Coin Alert System v5.48 — Upbit KRW 자동매매
 
-v5.48: 분할 손절 + DCA 간격 확대 + 봉 수 확장 (2026-03-22)
+v5.48: 분할 손절 + DCA 간격 확대 + 봉 수 확장 + 리스크 모니터 (2026-03-22)
 - [제안A] 분할 손절: SL 1단계(-4%)→50% 매도, SL 2단계(-6%)→나머지 전량 매도
   근거: 백테스트 SL 평균 손실 -5.83%→-2.68% (54% 감소), 반등 시 나머지 50% 회복 기회
 - [제안D] DCA_DROP_PCT 5→7%: DCA 진입 간격 확대 → DCA-SL 레이스 컨디션 해소
   근거: 5% DCA 후 즉시 SL 패턴 차단, MDD 2.85%p 개선
 - [제안C] SIGNAL_CANDLES 300→450: 지지/저항 정확도 향상 (~12일→~19일)
+- [신설] 단계별 리스크 모니터: Level 1(DD -3%/SL 2연속)→사이징 70%, Level 2(DD -5%/SL 3연속)→매수 차단
+  근거: 서킷브레이커(DD -8%) 발동 전 사전 대응, 연속 SL 시 점진적 노출 축소
 
 v5.46: STRONG_CLOSE 신호매도 가드 누락 수정 (2026-03-22)
 - [BUG] SIGNAL 매도 가드가 CLOSE에만 적용, STRONG_CLOSE 우회 → 저수익 매도 발생
@@ -539,6 +541,13 @@ CATASTROPHIC_STOP_PCT = 10.0    # v5.2: 15→10% (SAHARA -10% 사고 시 15%는 
                                 # 즉시 시장가 전량 매도, MIN_HOLD_HOURS 무시
                                 # 대원칙2 "손절은 최후의 수단" — 10%는 구조적 붕괴 임계
 
+# v5.48 신설: 단계별 리스크 레벨 (서킷브레이커 사전 대응)
+RISK_LEVEL_1_DD = 3.0     # Level 1 (주의): 일일 DD -3% 또는 SL 2연속
+RISK_LEVEL_2_DD = 5.0     # Level 2 (경고): 일일 DD -5% 또는 SL 3연속
+RISK_LEVEL_1_SIZE = 0.7   # Level 1: 포지션 사이징 70%로 축소
+RISK_LEVEL_2_SIZE = 0.0   # Level 2: 신규 매수 차단
+RISK_SL_LOOKBACK_HOURS = 6  # 최근 6시간 내 연속 SL 카운트
+
 # v5.18 신설: 일일 손실 서킷브레이커 (3/14 4연속 SL 교훈)
 # v5.20.1: DAILY_LOSS_LIMIT_PCT, MAX_SL_PER_DAY 제거
 # 이유: 대원칙5 "하락장에서 포지션 구축" — SL 발동 후가 오히려 저점 매수 기회
@@ -964,6 +973,40 @@ def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price
         record["pnl_pct"] = round(pnl_pct, 2)
     history.append(record)
     _save_trade_history(history)
+
+
+def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason, entry_price, pnl_pct, extra_data=None):
+    """매도 체결 시 오케스트레이터에 분석 webhook 발송 (비동기, 실패 무시)."""
+    try:
+        import threading
+        def _send():
+            try:
+                payload = {
+                    "ticker": ticker,
+                    "side": side,
+                    "price": round(price, 2),
+                    "volume": round(volume, 8),
+                    "krw_amount": round(krw_amount),
+                    "reason": reason,
+                    "entry_price": round(entry_price, 2),
+                    "pnl_pct": round(pnl_pct, 2),
+                    "timestamp": utc_now().isoformat(),
+                }
+                if extra_data:
+                    payload.update(extra_data)
+                # coin-alert 프로젝트 ID (오케스트레이터 DB 기준)
+                resp = requests.post(
+                    "http://localhost:8000/api/v1/projects/coin-alert/trade-analysis",
+                    json=payload,
+                    timeout=5,
+                )
+                if resp.status_code == 200:
+                    print(f"   📊 {ticker.replace('KRW-','')} 매매 분석 webhook 전송 완료")
+            except Exception as e:
+                pass  # 분석 webhook 실패는 매매에 영향 없음
+        threading.Thread(target=_send, daemon=True).start()
+    except Exception:
+        pass
 
 
 # ============================================
@@ -2292,6 +2335,39 @@ def generate_chart(ticker, data, result):
         return None
 
 
+def get_risk_level(trade_history, daily_dd_pct):
+    """단계별 리스크 레벨 판정. daily_dd_pct는 양수 값 (예: 3.0 = -3%)"""
+    # 최근 6시간 내 SL 연속 카운트
+    now = utc_now()
+    recent_sls = 0
+    for t in reversed(trade_history):
+        if t.get("side") not in ("SELL", "PARTIAL_SELL"):
+            continue
+        reason = t.get("reason", "")
+        if reason not in ("STOP_LOSS", "PARTIAL_SL1", "CATASTROPHIC_STOP"):
+            continue
+        try:
+            ts = datetime.fromisoformat(t["timestamp"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            hours_ago = (now - ts).total_seconds() / 3600
+            if hours_ago <= RISK_SL_LOOKBACK_HOURS:
+                recent_sls += 1
+            else:
+                break
+        except (ValueError, TypeError, KeyError):
+            continue
+
+    # Level 2: 경고
+    if daily_dd_pct >= RISK_LEVEL_2_DD or recent_sls >= 3:
+        return 2, recent_sls, "경고"
+    # Level 1: 주의
+    if daily_dd_pct >= RISK_LEVEL_1_DD or recent_sls >= 2:
+        return 1, recent_sls, "주의"
+    # Level 0: 정상
+    return 0, recent_sls, "정상"
+
+
 # ============================================
 # 메인
 # ============================================
@@ -2425,6 +2501,28 @@ def main():
     cb_triggered, drawdown, ref_val, cb_type = check_circuit_breaker(
         portfolio, capital, results, mutate_meta=AUTO_TRADE_ENABLED)
     can_trade = AUTO_TRADE_ENABLED and not cb_triggered
+
+    # v5.48: 단계별 리스크 레벨 체크
+    risk_level = 0
+    risk_sl_count = 0
+    risk_label = "정상"
+    position_size_mult = 1.0
+    if AUTO_TRADE_ENABLED:
+        trade_hist = _load_trade_history()
+        daily_dd_pct = drawdown * 100 if cb_type == "DAILY" else 0
+        # daily_dd가 OK여도 meta에서 직접 계산
+        meta = portfolio.get("_meta", {})
+        if meta.get("daily_dd"):
+            daily_dd_pct = max(daily_dd_pct, meta["daily_dd"] * 100)
+        risk_level, risk_sl_count, risk_label = get_risk_level(trade_hist, daily_dd_pct)
+        if risk_level >= 2:
+            position_size_mult = RISK_LEVEL_2_SIZE
+            print(f"   🚨 리스크 Level 2 ({risk_label}): 신규 매수 차단 (DD -{daily_dd_pct:.1f}%, SL {risk_sl_count}건/6h)")
+            send_telegram(f"🚨 <b>리스크 Level 2</b> ({risk_label})\n일일 DD -{daily_dd_pct:.1f}% | SL {risk_sl_count}건/6h\n신규 매수 차단 중")
+        elif risk_level >= 1:
+            position_size_mult = RISK_LEVEL_1_SIZE
+            print(f"   ⚠️ 리스크 Level 1 ({risk_label}): 포지션 사이징 {RISK_LEVEL_1_SIZE*100:.0f}% (DD -{daily_dd_pct:.1f}%, SL {risk_sl_count}건/6h)")
+
     if cb_triggered and AUTO_TRADE_ENABLED:
         cur_val = portfolio.get('_meta', {}).get('last_value', 0)
         if cb_type == "DAILY":
@@ -2578,6 +2676,27 @@ def main():
                             if order:
                                 record_order(order_log, ticker, "SELL")
                                 record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "PARTIAL_SL1", entry_p, pnl_pct)
+                                # v5.48: 분할손절 분석 webhook
+                                _hold_h = 0
+                                try:
+                                    _ed = pos.get("entry_date", "")
+                                    if _ed and _ed != "synced":
+                                        _edt = datetime.fromisoformat(_ed)
+                                        if _edt.tzinfo is None:
+                                            _edt = _edt.replace(tzinfo=timezone.utc)
+                                        _hold_h = round((utc_now() - _edt).total_seconds() / 3600, 1)
+                                except Exception:
+                                    pass
+                                _send_trade_analysis_webhook(
+                                    ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
+                                    "PARTIAL_SL1", entry_p, pnl_pct,
+                                    extra_data={
+                                        "hold_hours": _hold_h,
+                                        "entry_rsi": round(r.get("rsi", 0), 1),
+                                        "exit_rsi": round(r.get("rsi", 0), 1),
+                                        "entry_score": round(r.get("ensemble_score", 0), 1),
+                                    }
+                                )
                                 pos["sl_partial_done"] = True
                                 pos["volume"] = vol - sell_vol
                                 signal_fired = True
@@ -2850,6 +2969,11 @@ def main():
                             # v5.17: 분할매수 — 첫 진입 시 INITIAL_BUY_RATIO만 매수
                             full_krw = ps["position_krw"]
                             buy_krw = full_krw * INITIAL_BUY_RATIO
+                            # v5.48: 리스크 레벨에 따른 사이징 조정
+                            buy_krw = buy_krw * position_size_mult
+                            if buy_krw < 5000:
+                                print(f"   🚨 {name} 매수 차단 (리스크 Level {risk_level}: {risk_label})")
+                                continue
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
@@ -2900,6 +3024,27 @@ def main():
                             entry_p = portfolio[ticker]["entry_price"]
                             pnl     = (r["price"] / entry_p - 1) * 100 if entry_p > 0 else 0
                             record_trade(ticker, "SELL", r["price"], vol, vol * r["price"], close_reason, entry_p, pnl)
+                            # v5.48: 매도 분석 webhook
+                            _hold_h = 0
+                            try:
+                                _ed = portfolio[ticker].get("entry_date", "")
+                                if _ed and _ed != "synced":
+                                    _edt = datetime.fromisoformat(_ed)
+                                    if _edt.tzinfo is None:
+                                        _edt = _edt.replace(tzinfo=timezone.utc)
+                                    _hold_h = round((utc_now() - _edt).total_seconds() / 3600, 1)
+                            except Exception:
+                                pass
+                            _send_trade_analysis_webhook(
+                                ticker, "SELL", r["price"], vol, vol * r["price"],
+                                close_reason, entry_p, pnl,
+                                extra_data={
+                                    "hold_hours": _hold_h,
+                                    "entry_rsi": round(r.get("rsi", 0), 1),
+                                    "exit_rsi": round(r.get("rsi", 0), 1),
+                                    "entry_score": round(r.get("ensemble_score", 0), 1),
+                                }
+                            )
                             # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
                             if pnl < 0:
                                 order_log[f"{ticker}_STOP_CD"] = utc_now().isoformat()
