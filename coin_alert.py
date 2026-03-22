@@ -2447,6 +2447,11 @@ def main():
                        "above_sma50": True, "above_sma200": True}
     regime_weights = get_regime_strategy_weights(regime_info["regime"])
     threshold      = get_regime_threshold(regime_info["regime"])
+    # 레짐을 _meta에 저장 (대시보드에서 표시용)
+    if AUTO_TRADE_ENABLED:
+        meta = portfolio.get("_meta", {})
+        meta["regime"] = regime_info["regime"]
+        portfolio["_meta"] = meta
 
     _rs = get_regime_scoring(regime_info["regime"])
     print(f"🌍 시장 레짐(BTC): {get_regime_emoji(regime_info['regime'])} "
