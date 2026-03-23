@@ -1011,7 +1011,7 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
                     payload.update(extra_data)
                 # coin-alert 프로젝트 ID (오케스트레이터 DB 기준)
                 resp = requests.post(
-                    "http://localhost:8000/api/v1/projects/coin-alert/trade-analysis",
+                    "http://146.56.119.175:8000/api/v1/projects/coin-alert/trade-analysis",
                     json=payload,
                     timeout=5,
                 )
