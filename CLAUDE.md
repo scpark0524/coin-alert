@@ -1,9 +1,66 @@
 # CLAUDE.md — Coin Alert System
 
 ## 작업 규칙
-- 코드 수정 시 **README.md + 메모리 파일** 함께 업데이트 후 커밋 & 푸시
+
+### 수정 전 (Plan)
+- **바로 코드에 손대지 말 것** — 먼저 아래 항목을 보고하고 사용자 승인 후 착수
+  1. **원인 가설**: 데이터 흐름(아래 참조)에서 어느 단계가 문제인지
+  2. **수정 범위**: 어떤 파일의 어떤 부분을 변경하는지
+  3. **영향 범위**: 이 변경이 다른 곳(다른 VM, 다른 함수, cron 실행)에 영향을 주는지
+  4. **검증 계획**: 수정 후 무엇을 어떻게 테스트하여 "고쳐졌다"고 증명할지
+
+### 수정 중 (Execute)
+- 코드 이동/리네임 시 **의존 변수 순서 검증** (사건: portfolio 로드 전 참조로 12회 크래시)
+- `except` 블록에 `pass` 금지 — 최소 print/logging 필수 (사건: webhook 실패 수주간 미발견)
+- VM 간 통신 URL은 **환경변수 필수**, localhost 절대 금지 (사건: webhook localhost 하드코딩)
 - 커밋 메시지는 한국어로 작성
+
+### 과거 반복 사고 패턴 (수정 시 반드시 대조)
+1. **파라미터 과격 변경 → 매매 완전 차단**: MIN_VOLUME_24H 100억(v5.9), MAX_CONCURRENT 6(v4.0), TRADING_HALT=True(v5.3.1) → 매수 0건/수일. **파라미터 변경 시 "이 값이면 매매가 아예 안 될 수 있는가?" 반드시 확인**
+2. **오진단 → 역효과 수정**: v5.18에서 "연쇄 SL"로 진단했지만 실제 원인은 신호매도 Churn → TP 상향이 오히려 분할매도 무력화. **증상과 원인을 구분하고, 원인을 정확히 짚은 후에만 수정**
+3. **선언만 하고 미구현**: BTC_REGIME_FILTER(v5.9), validate_pre_trade()(v5.9), MIN_ENTRY_SCORE(v5.20.1) → 코드에 상수/함수 선언했으나 실제 호출부 미구현. **선언과 호출 양쪽 확인 필수**
+4. **VM 코드 불일치**: AI Command Center 데일리루틴이 VM에서 직접 파라미터 변경 → Git 미커밋 → 로컬과 VM 코드 괴리(v4.6). **VM 코드 변경 시 반드시 로컬 동기화 + Git 커밋**
+5. **매도 로직 순서 오류**: SL이 TIME_STOP보다 먼저 실행되어 시간스탑 기회 박탈(v5.32). **매도 우선순위: TP3 → CATASTROPHIC → TIME_STOP → BREAKEVEN → 분할SL → 트레일링 → RSI_SELL → 신호매도**
+6. **분할매도 체계 우회**: RSI_SELL이 TP1 미만(+0.6%)에서 전량매도(v5.40), STRONG_CLOSE가 신호매도 가드 우회(v5.46). **새 매도 경로 추가 시 분할매도 대원칙과 신호매도 가드 모두 적용 확인**
+
+### 수정 후 (Verify)
+- `bash deploy.sh` → 해시 검증 확인
+- **리얼 테스트 필수**: 실제 cron 실행 또는 수동 실행으로 동작 확인
+- 검증 증거(로그, DB 조회, API 응답) 포함하여 결과 보고
+- README.md + 메모리 파일 함께 업데이트 후 커밋 & 푸시
 - 버전 올릴 때 변경할 곳: 파일 상단 docstring, `format_status_message`, `main()` 배너, `meta["version"]`
+
+## 데이터 흐름 (오류 추적 시 반드시 참조)
+```
+[매매 실행 — cron, 트레이딩VM 158.179.171.23]
+coin_alert.py
+  → Upbit API (매수/매도 주문)
+  → portfolio.json / order_log.json (로컬 상태)
+  → trade_history.json (매매 기록 영구 보관)
+  → Telegram API (체결 알림)
+  ※ cron: 피크 15분(KST 21-01, 09-10) / 일반 30분, flock으로 중복 방지
+  ※ 242종목 분석 ~15분 소요 — cron 겹침 시 CPU 경합으로 30분+ 지연 (사건: 3중 겹침)
+
+[매매 분석 webhook — 트레이딩VM → 오케스트레이터VM]
+coin_alert.py → $ORCHESTRATOR_URL/api/v1/projects/coin-alert/trade-analysis → trade_analyses DB
+  ※ ORCHESTRATOR_URL 환경변수 필수 (.env에 정의)
+  ※ localhost 절대 금지 — 트레이딩 VM에 오케스트레이터 없음 (사건: 수주간 silent fail)
+  ※ except 블록에서 에러 로그 출력 필수 (pass 금지)
+
+[대시보드 일별 P&L — 오케스트레이터VM]
+trade_history.json(SSH 조회) → dashboard_data.py → 7일간 KST 날짜별 직접 집계
+  ※ DB 스냅샷 미참조 — 데일리 루틴 실패해도 P&L 정상 표시 (사건: 3/22 -177원 오류)
+
+[데일리 루틴 — 오케스트레이터VM 146.56.119.175]
+APScheduler(KST 07:00) → daily_routine.py → 6단계 플로우 순차 실행
+  ※ 서버 재시작 시 고아 루틴 자동 정리 (RUNNING → FAILED)
+
+[환경변수 맵 — 트레이딩VM .env]
+UPBIT_ACCESS_KEY / UPBIT_SECRET_KEY — Upbit API 인증
+TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID — 텔레그램 알림
+INITIAL_CAPITAL — 초기 자본금 (현재 500만원)
+ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000)
+```
 
 ## 프로젝트 개요
 - **Upbit KRW 코인 자동매매 시스템** (Oracle Cloud VM + pyupbit + Telegram)
