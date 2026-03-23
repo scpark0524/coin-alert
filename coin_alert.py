@@ -679,6 +679,7 @@ TELEGRAM_BOT_TOKEN  = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID    = os.environ.get("TELEGRAM_CHAT_ID")
 UPBIT_ACCESS_KEY    = os.environ.get("UPBIT_ACCESS_KEY")
 UPBIT_SECRET_KEY    = os.environ.get("UPBIT_SECRET_KEY")
+ORCHESTRATOR_URL    = os.environ.get("ORCHESTRATOR_URL", "")  # 오케스트레이터 VM 주소 (예: http://146.56.119.175:8000)
 
 AUTO_TRADE_ENABLED = all([UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY])
 
@@ -991,7 +992,9 @@ def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price
 
 
 def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason, entry_price, pnl_pct, extra_data=None):
-    """매도 체결 시 오케스트레이터에 분석 webhook 발송 (비동기, 실패 무시)."""
+    """매도 체결 시 오케스트레이터에 분석 webhook 발송 (비동기, 실패 시 로그 출력)."""
+    if not ORCHESTRATOR_URL:
+        return  # 환경변수 미설정 시 무시 (GitHub Actions 등)
     try:
         import threading
         def _send():
@@ -1009,19 +1012,17 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
                 }
                 if extra_data:
                     payload.update(extra_data)
-                # coin-alert 프로젝트 ID (오케스트레이터 DB 기준)
-                resp = requests.post(
-                    "http://146.56.119.175:8000/api/v1/projects/coin-alert/trade-analysis",
-                    json=payload,
-                    timeout=5,
-                )
+                url = f"{ORCHESTRATOR_URL}/api/v1/projects/coin-alert/trade-analysis"
+                resp = requests.post(url, json=payload, timeout=5)
                 if resp.status_code == 200:
                     print(f"   📊 {ticker.replace('KRW-','')} 매매 분석 webhook 전송 완료")
+                else:
+                    print(f"   ⚠️ {ticker.replace('KRW-','')} webhook 응답 {resp.status_code}: {resp.text[:100]}")
             except Exception as e:
-                pass  # 분석 webhook 실패는 매매에 영향 없음
+                print(f"   ⚠️ {ticker.replace('KRW-','')} webhook 전송 실패: {e}")
         threading.Thread(target=_send, daemon=True).start()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"   ⚠️ webhook 스레드 생성 실패: {e}")
 
 
 # ============================================
