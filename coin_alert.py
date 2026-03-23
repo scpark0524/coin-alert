@@ -1108,7 +1108,7 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl"):
+                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl", "sl_partial_done"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
             if "dca_count" not in actual[t]:
