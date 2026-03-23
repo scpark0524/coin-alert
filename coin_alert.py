@@ -2374,7 +2374,7 @@ def get_risk_level(trade_history, daily_dd_pct):
         if t.get("side") not in ("SELL", "PARTIAL_SELL"):
             continue
         reason = t.get("reason", "")
-        if reason not in ("STOP_LOSS", "PARTIAL_SL1", "CATASTROPHIC_STOP"):
+        if reason not in ("STOP_LOSS", "CATASTROPHIC_STOP"):
             continue
         try:
             ts = datetime.fromisoformat(t["timestamp"])
