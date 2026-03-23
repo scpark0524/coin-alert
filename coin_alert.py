@@ -2587,6 +2587,13 @@ def main():
 
     # Phase 3: 매매 실행
     print("\n💹 매매 판단...")
+    # webhook 공통 데이터: 레짐 + BTC 24h 변화율
+    _wh_regime = regime_info.get("regime", "")
+    _wh_btc_chg = 0.0
+    if btc_signal is not None and len(btc_signal) >= 24:
+        _btc_now = float(btc_signal["Close"].iloc[-1])
+        _btc_24h = float(btc_signal["Close"].iloc[-24])
+        _wh_btc_chg = round((_btc_now / _btc_24h - 1) * 100, 2) if _btc_24h > 0 else 0.0
     portfolio_tickers  = {k for k in portfolio if k not in ("_meta", "_sell_memory")}
     total_exposure     = sum(
         portfolio[t].get("volume", 0) * r["price"] / total_capital
@@ -2657,7 +2664,8 @@ def main():
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP1", entry_p, pnl_pct,
                             extra_data={"hold_hours": hold_hours, "entry_rsi": round(r.get("rsi", 0), 1),
-                                        "exit_rsi": round(r.get("rsi", 0), 1), "entry_score": round(r.get("ensemble_score", 0), 1)}
+                                        "exit_rsi": round(r.get("rsi", 0), 1), "entry_score": round(r.get("ensemble_score", 0), 1),
+                                        "market_regime": _wh_regime, "btc_change_pct": _wh_btc_chg}
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -2686,7 +2694,8 @@ def main():
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP2", entry_p, pnl_pct,
                             extra_data={"hold_hours": hold_hours, "entry_rsi": round(r.get("rsi", 0), 1),
-                                        "exit_rsi": round(r.get("rsi", 0), 1), "entry_score": round(r.get("ensemble_score", 0), 1)}
+                                        "exit_rsi": round(r.get("rsi", 0), 1), "entry_score": round(r.get("ensemble_score", 0), 1),
+                                        "market_regime": _wh_regime, "btc_change_pct": _wh_btc_chg}
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP2 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -2752,6 +2761,7 @@ def main():
                                         "entry_rsi": round(r.get("rsi", 0), 1),
                                         "exit_rsi": round(r.get("rsi", 0), 1),
                                         "entry_score": round(r.get("ensemble_score", 0), 1),
+                                        "market_regime": _wh_regime, "btc_change_pct": _wh_btc_chg,
                                     }
                                 )
                                 pos["sl_partial_done"] = True
@@ -2839,7 +2849,8 @@ def main():
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                                     "RSI_SELL_TP1", entry_p, pnl_pct,
                                     extra_data={"hold_hours": hold_hours, "entry_rsi": round(r.get("rsi", 0), 1),
-                                                "exit_rsi": round(cur_rsi, 1), "entry_score": round(r.get("ensemble_score", 0), 1)}
+                                                "exit_rsi": round(cur_rsi, 1), "entry_score": round(r.get("ensemble_score", 0), 1),
+                                                "market_regime": _wh_regime, "btc_change_pct": _wh_btc_chg}
                                 )
                         elif not can_trade:
                             print(f"   📊 {name} RSI 과매수 감지 (PnL {pnl_pct:+.1f}%, 자동매매 비활성)")
@@ -3125,6 +3136,7 @@ def main():
                                     "entry_rsi": round(r.get("rsi", 0), 1),
                                     "exit_rsi": round(r.get("rsi", 0), 1),
                                     "entry_score": round(r.get("ensemble_score", 0), 1),
+                                    "market_regime": _wh_regime, "btc_change_pct": _wh_btc_chg,
                                 }
                             )
                             # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
