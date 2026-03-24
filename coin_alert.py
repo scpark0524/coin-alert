@@ -341,23 +341,34 @@ def _fetch_excluded_tickers():
     DANGEROUS_CAUTIONS = {"GLOBAL_PRICE_DIFFERENCES", "CONCENTRATION_OF_SMALL_ACCOUNTS"}
     warned = set()
     cautioned = set()
+    warning_reasons = {}   # {ticker: [reason, ...]} — ML 추적용
+    caution_reasons = {}
     try:
         resp = requests.get("https://api.upbit.com/v1/market/all?is_details=true", timeout=10)
         if resp.status_code == 200:
             for m in resp.json():
                 if not m["market"].startswith("KRW-"):
                     continue
+                ticker = m["market"]
                 ev = m.get("market_event", {})
                 if ev.get("warning"):
-                    warned.add(m["market"])
+                    warned.add(ticker)
+                    warning_reasons[ticker] = "warning"
                 caution = ev.get("caution", {})
                 if isinstance(caution, dict):
-                    for flag in DANGEROUS_CAUTIONS:
-                        if caution.get(flag):
-                            cautioned.add(m["market"])
-                            break
+                    matched = [f for f in DANGEROUS_CAUTIONS if caution.get(f)]
+                    if matched:
+                        cautioned.add(ticker)
+                        caution_reasons[ticker] = "/".join(matched)
     except Exception as e:
         print(f"   ⚠️ 투자유의/위험 조회 실패: {e}")
+    # 상세 로깅 (ML 데이터 추적용)
+    if warned:
+        names = [t.replace("KRW-", "") for t in warned]
+        print(f"   ⚠️ 투자유의 제외: {', '.join(names)}")
+    if cautioned:
+        for t, reasons in caution_reasons.items():
+            print(f"   🚫 투자위험 제외: {t.replace('KRW-', '')} ({reasons})")
     return warned, cautioned
 
 def fetch_krw_tickers():
@@ -972,7 +983,39 @@ def _save_trade_history(history):
     with open(TRADE_HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
-def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price=0, pnl_pct=0):
+def capture_entry_context(ticker, result, regime_info, btc_signal):
+    """매수 시점 ML 피처 스냅샷 — 이미 조회된 데이터에서만 계산 (추가 API 호출 없음)."""
+    ctx = {
+        "entry_rsi": round(result.get("rsi", 0), 1),
+        "entry_score": round(result.get("ensemble_score", 0), 1),
+        "entry_adx": round(result.get("adx", 0), 1),
+        "entry_confidence": round(result.get("confidence", 0), 1),
+        "market_regime": regime_info.get("regime", ""),
+        "regime_adx": round(regime_info.get("adx", 0), 1),
+        "regime_vol": round(regime_info.get("vol_20", 0), 1),
+    }
+    # BB 위치: 현재가가 BB 상단/하단 대비 어디인지 (0=하단, 1=상단)
+    bb_upper = result.get("bb_upper", 0)
+    bb_lower = result.get("bb_lower", 0)
+    if bb_upper > bb_lower:
+        ctx["bb_position"] = round((result.get("price", 0) - bb_lower) / (bb_upper - bb_lower), 3)
+    else:
+        ctx["bb_position"] = 0.5
+    # 가격 백분위 (전체 캔들 대비 현재 위치)
+    ctx["price_percentile"] = round(result.get("full_percentile", 50), 1)
+    # 거래량 비율
+    ctx["volume_ratio"] = round(result.get("volume_ratio", 1.0), 1)
+    # BTC 24h 변화율
+    if btc_signal is not None and len(btc_signal) >= 24:
+        btc_now = float(btc_signal["Close"].iloc[-1])
+        btc_24h = float(btc_signal["Close"].iloc[-24])
+        ctx["btc_change_pct"] = round((btc_now / btc_24h - 1) * 100, 2) if btc_24h > 0 else 0
+    else:
+        ctx["btc_change_pct"] = 0
+    return ctx
+
+
+def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price=0, pnl_pct=0, entry_context=None):
     """매매 히스토리 기록. side='BUY'|'SELL'|'PARTIAL_SELL'"""
     history = _load_trade_history()
     record = {
@@ -987,6 +1030,8 @@ def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price
     if side in ("SELL", "PARTIAL_SELL"):
         record["entry_price"] = round(entry_price, 2)
         record["pnl_pct"] = round(pnl_pct, 2)
+    if entry_context:
+        record["entry_context"] = entry_context
     history.append(record)
     _save_trade_history(history)
 
@@ -2989,7 +3034,8 @@ def main():
                         order = execute_buy(ticker, add_krw)
                         if order:
                             record_order(order_log, ticker, "BUY")
-                            record_trade(ticker, "BUY", r["price"], add_krw / r["price"], add_krw, "DCA")
+                            record_trade(ticker, "BUY", r["price"], add_krw / r["price"], add_krw, "DCA",
+                                        entry_context=capture_entry_context(ticker, r, regime_info, btc_signal))
                             old_vol = pos.get("volume", 0)
                             add_vol = add_krw / r["price"]
                             new_vol = old_vol + add_vol
@@ -3070,7 +3116,8 @@ def main():
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
-                                record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL")
+                                record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL",
+                                            entry_context=capture_entry_context(ticker, r, regime_info, btc_signal))
                                 pending_exposure += proposed_pct
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
