@@ -13,6 +13,27 @@ echo "=== coin-alert 배포 시작 ==="
 echo "대상: $VM_HOST:$VM_DIR"
 echo ""
 
+# 0. VM 코드가 로컬보다 새로운지 확인 (code_apply 덮어쓰기 방지)
+echo "[0/5] VM 코드 선행 체크..."
+VM_CURRENT=$(ssh -i "$SSH_KEY" "$VM_HOST" "md5sum $VM_DIR/coin_alert.py 2>/dev/null | cut -d' ' -f1" 2>/dev/null || echo "none")
+LOCAL_CURRENT=$(md5 -q "$SCRIPT_DIR/coin_alert.py" 2>/dev/null || md5sum "$SCRIPT_DIR/coin_alert.py" | cut -d' ' -f1)
+if [ "$VM_CURRENT" != "none" ] && [ "$VM_CURRENT" != "$LOCAL_CURRENT" ]; then
+    VM_VER=$(ssh -i "$SSH_KEY" "$VM_HOST" "head -2 $VM_DIR/coin_alert.py | tail -1" 2>/dev/null)
+    LOCAL_VER=$(head -2 "$SCRIPT_DIR/coin_alert.py" | tail -1)
+    echo "  ⚠️  VM과 로컬 코드가 다릅니다!"
+    echo "  VM:    $VM_VER"
+    echo "  로컬:  $LOCAL_VER"
+    echo "  → VM에 code_apply로 적용된 수정이 있을 수 있습니다."
+    echo "  → 계속하면 VM 코드가 로컬 버전으로 덮어써집니다."
+    echo ""
+    read -p "  계속 배포하시겠습니까? (y/N): " CONFIRM
+    if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
+        echo "  배포 취소. VM 코드를 먼저 로컬로 가져오세요:"
+        echo "  scp -i $SSH_KEY $VM_HOST:$VM_DIR/coin_alert.py $SCRIPT_DIR/coin_alert.py"
+        exit 0
+    fi
+fi
+
 # 1. 문법 검증
 echo "[1/5] 문법 검증..."
 python3 -c "import py_compile; py_compile.compile('$SCRIPT_DIR/coin_alert.py', doraise=True)" || exit 1

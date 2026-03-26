@@ -55,6 +55,12 @@ trade_history.json(SSH 조회) → dashboard_data.py → 7일간 KST 날짜별 �
 APScheduler(KST 07:00) → daily_routine.py → 6단계 플로우 순차 실행
   ※ 서버 재시작 시 고아 루틴 자동 정리 (RUNNING → FAILED)
 
+[code_apply → deploy.sh 충돌 방지]
+데일리루틴 code_apply → 트레이딩VM에 SSH로 직접 수정 (v5.53 등)
+deploy.sh → 로컬 코드로 트레이딩VM 덮어쓰기
+  ※ deploy.sh 스텝0에서 VM-로컬 해시 비교 → 불일치 시 경고 + 확인 요청
+  ※ 불일치 발생 시: VM 코드를 로컬로 먼저 가져온 뒤 deploy (scp → 로컬)
+
 [환경변수 맵 — 트레이딩VM .env]
 UPBIT_ACCESS_KEY / UPBIT_SECRET_KEY — Upbit API 인증
 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID — 텔레그램 알림
