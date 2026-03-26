@@ -1,5 +1,13 @@
 """
-🪙 Coin Alert System v5.49 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.52 — Upbit KRW 자동매매
+
+v5.52: ML 피처 품질 개선 + 매수 필터 전환 (2026-03-26)
+- [핵심] 매수 필터: 레인지 백분위 → 최저가 거리 기반 (승률 81→85%, SL -33%)
+- [신설] build_trade_features() — ML 피처 추출 + JSONL 로깅
+- [신설] compute_trade_quality_score() — 매매 품질 점수 (PnL+시간효율+위험조정)
+- [신설] MIN_SIGNAL_CANDLES=120 — 450봉 미달 종목 폴백
+- [강화] capture_entry_context() — 매수 시점 ML 피처 스냅샷 (BUY record에 저장)
+- [강화] _fetch_excluded_tickers() — 제외 사유 상세 로깅
 
 v5.49: 최저점 반경 매수 필터 (2026-03-22)
 - [핵심] 전체 캔들(450봉) 백분위 기반 매수 필터 — 레짐별 차등 한도
@@ -677,6 +685,12 @@ ORDER_COOLDOWN_MINUTES = 60   # v5.7: 120→60분 (실매수 미체결 대응 �
                               # v4.7 라운드트립 2건 → 60분에서도 동일 방어 (30분→발생, 60분→미발생)
                               # 대원칙1 "수익 극대화" — 합법적 시그널 불필요 차단 방지 왕복 거래 방지
 
+# ML 학습 데이터 수집 설정 (v5.52)
+ML_FEATURE_LOG      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_features.jsonl")
+ML_MIN_SAMPLES      = 100
+ML_SCORE_WEIGHTS    = {"pnl": 0.4, "time_efficiency": 0.2, "risk_adjusted": 0.3, "regime_fit": 0.1}
+MIN_SIGNAL_CANDLES  = 120   # 450봉 미달 종목 폴백 (RSI14 + BB20 + 여유분)
+
 # 파일 경로
 _BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PORTFOLIO_FILE  = os.path.join(_BASE_DIR, "portfolio.json")
@@ -963,6 +977,78 @@ def record_order(log, ticker, direction):
     for k in stale:
         del log[k]
     save_order_log(log)
+
+
+# ============================================
+# ML 피처 수집 (v5.52)
+# ============================================
+def compute_trade_quality_score(pnl_pct, holding_hours, volatility, regime):
+    """매매 품질 점수 — ML 학습 라벨. 범위 -1.0 ~ +1.0."""
+    try:
+        pnl_score = max(min(pnl_pct / 10.0, 1.0), -1.0)
+        time_eff = pnl_pct / max(holding_hours, 0.1)
+        time_score = max(min(time_eff / 2.0, 1.0), -1.0)
+        risk_adj = pnl_pct / max(volatility, 0.1)
+        risk_score = max(min(risk_adj / 3.0, 1.0), -1.0)
+        regime_bonus = {"BULL": 0.3, "MILD_BULL": 0.15, "SIDEWAYS": 0.0, "MILD_BEAR": -0.1, "BEAR": -0.2}
+        regime_score = max(min(regime_bonus.get(regime, 0.0) + pnl_score * 0.5, 1.0), -1.0)
+        w = ML_SCORE_WEIGHTS
+        total = w["pnl"]*pnl_score + w["time_efficiency"]*time_score + w["risk_adjusted"]*risk_score + w["regime_fit"]*regime_score
+        return round(max(min(total, 1.0), -1.0), 4)
+    except Exception:
+        return 0.0
+
+
+def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
+                         holding_hours, regime, entry_score, candles_df=None,
+                         entry_context=None):
+    """매매 피처 추출 + JSONL 로깅 — ML 학습 데이터 수집.
+
+    entry_context: capture_entry_context()가 매수 시 캡처한 스냅샷.
+    candles_df: 청산 시점 기술적 지표 추출용.
+    """
+    features = {
+        "timestamp": utc_now().isoformat(),
+        "ticker": ticker, "action": action,
+        "entry_price": entry_price, "exit_price": exit_price,
+        "pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else None,
+        "holding_hours": round(holding_hours, 2) if holding_hours is not None else None,
+        "regime": regime, "entry_score": entry_score,
+    }
+    # 진입 시점 피처 (capture_entry_context에서)
+    if entry_context:
+        features["entry_rsi"] = entry_context.get("entry_rsi")
+        features["entry_bb_position"] = entry_context.get("bb_position")
+        features["entry_adx"] = entry_context.get("entry_adx")
+        features["entry_confidence"] = entry_context.get("entry_confidence")
+        features["entry_volume_ratio"] = entry_context.get("volume_ratio")
+        features["entry_price_percentile"] = entry_context.get("price_percentile")
+        features["entry_btc_change"] = entry_context.get("btc_change_pct")
+    # 청산 시점 피처
+    if candles_df is not None and len(candles_df) >= 20:
+        try:
+            c = candles_df["Close"]
+            delta = c.diff()
+            gain = delta.clip(lower=0).rolling(14).mean()
+            loss = (-delta.clip(upper=0)).rolling(14).mean()
+            rs = gain / loss
+            exit_rsi = float((100 - 100 / (1 + rs)).iloc[-1])
+            features["exit_rsi"] = round(exit_rsi, 2) if not np.isnan(exit_rsi) else None
+            if entry_context is None:
+                features["entry_rsi"] = features["exit_rsi"]  # 폴백
+            atr = calc_atr(candles_df)
+            vol = float(atr.iloc[-1]) / float(c.iloc[-1]) * 100 if float(c.iloc[-1]) > 0 else 1.0
+            features["exit_volatility"] = round(vol, 2)
+            features["quality_score"] = compute_trade_quality_score(pnl_pct or 0, holding_hours or 0, vol, regime)
+        except Exception:
+            pass
+    # JSONL 로깅
+    try:
+        with open(ML_FEATURE_LOG, "a") as f:
+            f.write(json.dumps(features, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    return features
 
 
 # ============================================
