@@ -1067,35 +1067,39 @@ def _save_trade_history(history):
     with open(TRADE_HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
-def capture_entry_context(ticker, result, regime_info, btc_signal):
+def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_score=0):
     """매수 시점 ML 피처 스냅샷 — 이미 조회된 데이터에서만 계산 (추가 API 호출 없음)."""
+    from datetime import timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+    now_kst = utc_now().astimezone(KST)
+    price = result.get("price", 0)
+    atr = result.get("atr", 0)
     ctx = {
+        # [B] 진입 시점 기술지표
         "entry_rsi": round(result.get("rsi", 0), 1),
-        "entry_score": round(result.get("ensemble_score", 0), 1),
         "entry_adx": round(result.get("adx", 0), 1),
+        "entry_score": round(result.get("ensemble_score", 0), 1),
         "entry_confidence": round(result.get("confidence", 0), 1),
-        "market_regime": regime_info.get("regime", ""),
-        "regime_adx": round(regime_info.get("adx", 0), 1),
-        "regime_vol": round(regime_info.get("vol_20", 0), 1),
+        "entry_atr_pct": round(atr / price * 100, 2) if price > 0 and atr > 0 else 0,
+        "entry_volume_ratio": round(result.get("volume_ratio", 1.0), 2),
+        "entry_price_percentile": round(result.get("full_percentile", 50), 1),
+        # BB 위치 (0=하단, 1=상단)
+        "bb_position": 0.5,
+        # [D] 시장 컨텍스트
+        "entry_regime": regime_info.get("regime", ""),
+        "btc_change_pct": 0,
+        "fear_greed": fear_greed_score,
+        # [F] 시간
+        "entry_hour_kst": now_kst.hour,
     }
-    # BB 위치: 현재가가 BB 상단/하단 대비 어디인지 (0=하단, 1=상단)
     bb_upper = result.get("bb_upper", 0)
     bb_lower = result.get("bb_lower", 0)
     if bb_upper > bb_lower:
-        ctx["bb_position"] = round((result.get("price", 0) - bb_lower) / (bb_upper - bb_lower), 3)
-    else:
-        ctx["bb_position"] = 0.5
-    # 가격 백분위 (전체 캔들 대비 현재 위치)
-    ctx["price_percentile"] = round(result.get("full_percentile", 50), 1)
-    # 거래량 비율
-    ctx["volume_ratio"] = round(result.get("volume_ratio", 1.0), 1)
-    # BTC 24h 변화율
+        ctx["bb_position"] = round((price - bb_lower) / (bb_upper - bb_lower), 3)
     if btc_signal is not None and len(btc_signal) >= 24:
         btc_now = float(btc_signal["Close"].iloc[-1])
         btc_24h = float(btc_signal["Close"].iloc[-24])
         ctx["btc_change_pct"] = round((btc_now / btc_24h - 1) * 100, 2) if btc_24h > 0 else 0
-    else:
-        ctx["btc_change_pct"] = 0
     return ctx
 
 
@@ -1154,16 +1158,47 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
         print(f"   ⚠️ webhook 스레드 생성 실패: {e}")
 
 
-def _build_webhook_extra(pos, r, hold_hours, regime, btc_chg):
-    """webhook extra_data 구성 — 진입 시점 피처는 portfolio entry_context에서, 청산 시점은 현재 r에서."""
+def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_score=0, market_rising_count=0):
+    """webhook extra_data — 33컬럼 ML 피처 전부 채우기.
+
+    pos: portfolio[ticker] (entry_context 포함)
+    r: analyze_ticker 결과 (현재 시점 지표)
+    """
+    from datetime import timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+    now_kst = utc_now().astimezone(KST)
     ec = pos.get("entry_context", {}) if isinstance(pos, dict) else {}
+    price = r.get("price", 0)
+    atr = r.get("atr", 0)
     return {
-        "hold_hours": hold_hours,
+        # [B] 진입 시점 — entry_context에서 (없으면 현재값 폴백)
         "entry_rsi": ec.get("entry_rsi", round(r.get("rsi", 0), 1)),
+        "entry_adx": ec.get("entry_adx", round(r.get("adx", 0), 1)),
+        "entry_bb_position": ec.get("bb_position", 0.5),
+        "entry_atr_pct": ec.get("entry_atr_pct", round(atr / price * 100, 2) if price > 0 and atr > 0 else 0),
+        "entry_volume_ratio": ec.get("entry_volume_ratio", round(r.get("volume_ratio", 1.0), 2)),
+        "entry_price_percentile": ec.get("entry_price_percentile", round(r.get("full_percentile", 50), 1)),
+        "entry_score": ec.get("entry_score", round(r.get("ensemble_score", 0), 1)),
+        # [C] 청산 시점 — 현재 r에서
         "exit_rsi": round(r.get("rsi", 0), 1),
-        "entry_score": ec.get("entry_confidence", round(r.get("ensemble_score", 0), 1)),
-        "market_regime": regime,
+        "exit_adx": round(r.get("adx", 0), 1),
+        "exit_atr_pct": round(atr / price * 100, 2) if price > 0 and atr > 0 else 0,
+        # [D] 시장 컨텍스트
+        "entry_regime": ec.get("entry_regime", exit_regime),
+        "exit_regime": exit_regime,
         "btc_change_pct": btc_chg,
+        "fear_greed": ec.get("fear_greed", fear_greed_score),
+        "market_rising": market_rising_count,
+        # [E] 포지션 메타
+        "hold_hours": hold_hours,
+        "dca_count": pos.get("dca_count", 0) if isinstance(pos, dict) else 0,
+        "tp_level": pos.get("tp_level", 0) if isinstance(pos, dict) else 0,
+        "max_pnl_during_hold": pos.get("high_pnl", 0) if isinstance(pos, dict) else 0,
+        "sl_partial_done": 1 if (isinstance(pos, dict) and pos.get("sl_partial_done")) else 0,
+        # [F] 시간
+        "entry_hour_kst": ec.get("entry_hour_kst", now_kst.hour),
+        "exit_hour_kst": now_kst.hour,
+        "day_of_week": now_kst.weekday(),
     }
 
 
@@ -2727,13 +2762,15 @@ def main():
 
     # Phase 3: 매매 실행
     print("\n💹 매매 판단...")
-    # webhook 공통 데이터: 레짐 + BTC 24h 변화율
+    # webhook 공통 데이터: 레짐 + BTC 24h 변화율 + 공포탐욕 + 시장 상승 종목 수
     _wh_regime = regime_info.get("regime", "")
     _wh_btc_chg = 0.0
     if btc_signal is not None and len(btc_signal) >= 24:
         _btc_now = float(btc_signal["Close"].iloc[-1])
         _btc_24h = float(btc_signal["Close"].iloc[-24])
         _wh_btc_chg = round((_btc_now / _btc_24h - 1) * 100, 2) if _btc_24h > 0 else 0.0
+    _wh_fg = fg.get("score", 0) if fg else 0
+    _wh_rising = sum(1 for _r in results if _r.get("daily_change", 0) > 0 and _r["signal"] != "NO_DATA")
     portfolio_tickers  = {k for k in portfolio if k not in ("_meta", "_sell_memory")}
     total_exposure     = sum(
         portfolio[t].get("volume", 0) * r["price"] / total_capital
@@ -2803,7 +2840,7 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP1", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg)
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -2831,7 +2868,7 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP2", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg)
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP2 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -2892,7 +2929,7 @@ def main():
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                                     "PARTIAL_SL1", entry_p, pnl_pct,
-                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg)
+                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
                                 )
                                 pos["sl_partial_done"] = True
                                 pos["volume"] = vol - sell_vol
@@ -2975,7 +3012,7 @@ def main():
                                     f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                                     f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
                                 print(f"   📊 {name} RSI 분할익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}% (50% 매도)")
-                                _extra = _build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg)
+                                _extra = _build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
                                 _extra["exit_rsi"] = round(cur_rsi, 1)  # RSI_SELL은 청산 RSI가 별도
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
@@ -3119,7 +3156,7 @@ def main():
                         if order:
                             record_order(order_log, ticker, "BUY")
                             record_trade(ticker, "BUY", r["price"], add_krw / r["price"], add_krw, "DCA",
-                                        entry_context=capture_entry_context(ticker, r, regime_info, btc_signal))
+                                        entry_context=capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg))
                             old_vol = pos.get("volume", 0)
                             add_vol = add_krw / r["price"]
                             new_vol = old_vol + add_vol
@@ -3201,7 +3238,7 @@ def main():
                             if order:
                                 record_order(order_log, ticker, "BUY")
                                 record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL",
-                                            entry_context=capture_entry_context(ticker, r, regime_info, btc_signal))
+                                            entry_context=capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg))
                                 pending_exposure += proposed_pct
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
@@ -3262,7 +3299,7 @@ def main():
                             _send_trade_analysis_webhook(
                                 ticker, "SELL", r["price"], vol, vol * r["price"],
                                 close_reason, entry_p, pnl,
-                                extra_data=_build_webhook_extra(portfolio.get(ticker, {}), r, _hold_h, _wh_regime, _wh_btc_chg)
+                                extra_data=_build_webhook_extra(portfolio.get(ticker, {}), r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
                             )
                             # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
                             if pnl < 0:
