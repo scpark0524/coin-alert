@@ -1158,7 +1158,7 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
         print(f"   ⚠️ webhook 스레드 생성 실패: {e}")
 
 
-def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_score=0, market_rising_count=0):
+def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_score=0, market_rising_count=0, pnl_pct=0):
     """webhook extra_data — 33컬럼 ML 피처 전부 채우기.
 
     pos: portfolio[ticker] (entry_context 포함)
@@ -1199,6 +1199,12 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "entry_hour_kst": ec.get("entry_hour_kst", now_kst.hour),
         "exit_hour_kst": now_kst.hour,
         "day_of_week": now_kst.weekday(),
+        # [G] 라벨 — quality_score
+        "quality_score": compute_trade_quality_score(
+            pnl_pct, hold_hours,
+            atr / price * 100 if price > 0 and atr > 0 else 1.0,
+            exit_regime,
+        ),
     }
 
 
@@ -2840,7 +2846,7 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP1", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -2868,7 +2874,7 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP2", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP2 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -2929,7 +2935,7 @@ def main():
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                                     "PARTIAL_SL1", entry_p, pnl_pct,
-                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
+                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
                                 )
                                 pos["sl_partial_done"] = True
                                 pos["volume"] = vol - sell_vol
@@ -3012,7 +3018,7 @@ def main():
                                     f"진입{_fmt_krw(entry_p)} → 현재{_fmt_krw(r['price'])} ({pnl_pct:+.1f}%)\n"
                                     f"매도: {sell_vol:.8g} | 잔여: {pos['volume']:.8g}")
                                 print(f"   📊 {name} RSI 분할익절: RSI {cur_rsi:.0f} ≥ {regime_sell_trigger} ({regime_info['regime']}) | PnL {pnl_pct:+.1f}% (50% 매도)")
-                                _extra = _build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
+                                _extra = _build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
                                 _extra["exit_rsi"] = round(cur_rsi, 1)  # RSI_SELL은 청산 RSI가 별도
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
@@ -3299,7 +3305,7 @@ def main():
                             _send_trade_analysis_webhook(
                                 ticker, "SELL", r["price"], vol, vol * r["price"],
                                 close_reason, entry_p, pnl,
-                                extra_data=_build_webhook_extra(portfolio.get(ticker, {}), r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising)
+                                extra_data=_build_webhook_extra(portfolio.get(ticker, {}), r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl)
                             )
                             # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
                             if pnl < 0:
