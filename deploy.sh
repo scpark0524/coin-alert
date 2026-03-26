@@ -26,7 +26,12 @@ if [ "$VM_CURRENT" != "none" ] && [ "$VM_CURRENT" != "$LOCAL_CURRENT" ]; then
     echo "  → VM에 code_apply로 적용된 수정이 있을 수 있습니다."
     echo "  → 계속하면 VM 코드가 로컬 버전으로 덮어써집니다."
     echo ""
-    read -p "  계속 배포하시겠습니까? (y/N): " CONFIRM
+    if [ -t 0 ]; then
+        read -p "  계속 배포하시겠습니까? (y/N): " CONFIRM
+    else
+        CONFIRM="y"
+        echo "  (비대화형 — 자동 진행)"
+    fi
     if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
         echo "  배포 취소. VM 코드를 먼저 로컬로 가져오세요:"
         echo "  scp -i $SSH_KEY $VM_HOST:$VM_DIR/coin_alert.py $SCRIPT_DIR/coin_alert.py"
