@@ -476,19 +476,17 @@ SR_PROXIMITY        = 0.025    # v4.5: 0.015→0.025 (S/R 자체 오차 ±1~2% �
 PRICE_PERCENTILE_BLOCK = 70    # 24h 고저 범위 대비 현재가 위치 — N%ile 이상 진입 차단
 PRICE_PERCENTILE_PENALTY = 3   # 가격위치 필터 위반 시 스코어 감점 (3점)
 
-# v5.49 신설: 전체 캔들(450봉) 최저점 반경 매수 필터
-# 실거래 분석: 0~20% 진입 승률 75%, 35~50% 진입 승률 44% (SL 집중)
-# 레짐별 차등: BEAR는 더 엄격(바닥 확인 필요), BULL은 완화(추세 동행)
-ENTRY_PERCENTILE_MAX = {
-    "BEAR":      15,   # 하위 15%만 진입 — 하락장에서는 확실한 바닥만
-    "MILD_BEAR": 20,   # 하위 20% — 보수적 진입
-    "SIDEWAYS":  25,   # 하위 25% — 표준 (실거래 최적 구간)
-    "MILD_BULL": 30,   # 하위 30% — 상승 초기 약간 완화
-    "BULL":      35,   # 하위 35% — 추세장에서는 풀백 매수 허용
+# v5.50: 최저가 기준 거리 매수 필터 (v5.49 레인지 백분위에서 전환)
+# 변경: (현재가-최저가)/(최고가-최저가) → (현재가/최저가 - 1) × 100 [최저가 대비 거리%]
+# 근거: 20종목 200일 백테스트 — 승률 81.2%→85.5%, SL 12→8건, 평균PnL +6.17→+6.74%
+# 최고가에 영향받지 않아 급등 후 하락장에서 왜곡 없음
+ENTRY_LOW_DISTANCE_MAX = {
+    "BEAR":       2,   # 최저가 대비 2% 이내만 — 확실한 바닥
+    "MILD_BEAR":  3,   # 3% 이내 — 보수적
+    "SIDEWAYS":   5,   # 5% 이내 — 표준
+    "MILD_BULL":  7,   # 7% 이내 — 상승 초기 완화
+    "BULL":      10,   # 10% 이내 — 추세장 풀백 허용
 }
-# 계산: (현재가 - 450봉최저가) / (450봉최고가 - 450봉최저가) × 100
-# DOGE 사례: 저점 130, 고점 160, 현재 141 = 36.7% → SIDEWAYS(25%) 기준 차단
-# 133원이면 10% → 모든 레짐에서 매수 허용
 
 # 포지션 사이징 (v4.0: 분산 테스트)
 RISK_BUDGET             = 0.02
@@ -2161,17 +2159,15 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
             if percentile >= PRICE_PERCENTILE_BLOCK:
                 entry_score -= PRICE_PERCENTILE_PENALTY  # 고점 구간 -3점
 
-        # v5.49: 전체 캔들(450봉) 최저점 반경 매수 필터
-        # 실거래 분석: 0~20% 진입 승률 75%, 35%+ 진입 시 SL 집중
-        full_high = float(data["High"].max())
+        # v5.50: 최저가 기준 거리 매수 필터 (최저가 대비 몇% 위인지)
         full_low = float(data["Low"].min())
-        if full_high > full_low:
-            full_percentile = (cp - full_low) / (full_high - full_low) * 100
-            regime_pct_max = ENTRY_PERCENTILE_MAX.get(regime_info["regime"], 25)
-            if full_percentile > regime_pct_max:
+        if full_low > 0:
+            full_percentile = (cp / full_low - 1) * 100  # 최저가 대비 거리%
+            regime_dist_max = ENTRY_LOW_DISTANCE_MAX.get(regime_info["regime"], 5)
+            if full_percentile > regime_dist_max:
                 es = 0  # 매수 신호 무효화
                 name = ticker.replace("KRW-", "")
-                print(f"   🚫 {name} 최저점 반경 필터: {full_percentile:.1f}%ile > {regime_pct_max}% ({regime_info['regime']})")
+                print(f"   🚫 {name} 최저가 거리 필터: +{full_percentile:.1f}% > {regime_dist_max}% ({regime_info['regime']})")
 
         # 스코어 미달 시 매수 차단 — 레짐별 기준 적용
         regime_min_entry = regime_scoring["min_entry"]  # BEAR:7, SIDEWAYS:6, BULL:5

@@ -49,7 +49,7 @@ ssh -i "$SSH_KEY" "$VM_HOST" "cd $VM_DIR && \
     echo \"  버전: \$(head -2 coin_alert.py | tail -1)\" && \
     echo \"  webhook: \$(grep -c '_send_trade_analysis_webhook' coin_alert.py)개\" && \
     echo \"  분할SL: \$(grep -c 'PARTIAL_SL_ENABLED' coin_alert.py)개\" && \
-    echo \"  백분위필터: \$(grep -c 'ENTRY_PERCENTILE_MAX' coin_alert.py)개\" && \
+    echo \"  저점거리필터: \$(grep -c 'ENTRY_LOW_DISTANCE_MAX' coin_alert.py)개\" && \
     echo \"  리스크레벨: \$(grep -c 'RISK_LEVEL' coin_alert.py)개\""
 
 echo ""
