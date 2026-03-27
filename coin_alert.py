@@ -2554,36 +2554,19 @@ def generate_chart(ticker, data, result):
 
 
 def get_risk_level(trade_history, daily_dd_pct):
-    """단계별 리스크 레벨 판정. daily_dd_pct는 양수 값 (예: 3.0 = -3%)"""
-    # 최근 6시간 내 SL 연속 카운트
-    now = utc_now()
-    recent_sls = 0
-    for t in reversed(trade_history):
-        if t.get("side") not in ("SELL", "PARTIAL_SELL"):
-            continue
-        reason = t.get("reason", "")
-        if reason not in ("STOP_LOSS", "CATASTROPHIC_STOP"):
-            continue
-        try:
-            ts = datetime.fromisoformat(t["timestamp"])
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            hours_ago = (now - ts).total_seconds() / 3600
-            if hours_ago <= RISK_SL_LOOKBACK_HOURS:
-                recent_sls += 1
-            else:
-                break
-        except (ValueError, TypeError, KeyError):
-            continue
+    """단계별 리스크 레벨 판정.
 
-    # Level 2: 경고
-    if daily_dd_pct >= RISK_LEVEL_2_DD or recent_sls >= 3:
-        return 2, recent_sls, "경고"
-    # Level 1: 주의
-    if daily_dd_pct >= RISK_LEVEL_1_DD or recent_sls >= 2:
-        return 1, recent_sls, "주의"
+    v5.53: SL 제거 전략이므로 SL 카운트 기반 판정 비활성화.
+    DD(일일 낙폭)만으로 판정 — -30% SL(상폐 방어)만 남았으므로 SL 연속 발생은 극히 드뭄.
+    """
+    # Level 2: DD만으로 판정
+    if daily_dd_pct >= RISK_LEVEL_2_DD:
+        return 2, 0, "경고"
+    # Level 1: DD만으로 판정
+    if daily_dd_pct >= RISK_LEVEL_1_DD:
+        return 1, 0, "주의"
     # Level 0: 정상
-    return 0, recent_sls, "정상"
+    return 0, 0, "정상"
 
 
 # ============================================
