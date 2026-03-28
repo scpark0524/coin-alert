@@ -1,5 +1,9 @@
 """
-🪙 Coin Alert System v5.53 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.55 — Upbit KRW 자동매매
+
+v5.55: ML 피처 확장 (2026-03-28)
+- [ML] _build_webhook_extra() 피처 추가: sl_distance_pct(손절선 여유), pnl_per_day(일당 수익률)
+- [근거] ML 모델이 '아슬아슬한 거래'와 '안정적 거래' 구분 가능
 
 v5.53: 손절 제거 + 익절 반복 전략 전환 (2026-03-27)
 - [핵심] SL 제거 — PARTIAL_SL 비활성, LOSS_CUT 30%(상폐 방어만), CATASTROPHIC 30%
@@ -1212,6 +1216,10 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
             atr / price * 100 if price > 0 and atr > 0 else 1.0,
             exit_regime,
         ),
+        # [H] v5.54: 리스크 거리 피처 (ML 패턴 감지용)
+        "sl_distance_pct": round(LOSS_CUT_PCT - abs(min(pnl_pct, 0)), 2),
+        "position_age_days": round(hold_hours / 24, 2),
+        "pnl_per_day": round(pnl_pct / max(hold_hours / 24, 0.04), 4),
     }
 
 
