@@ -1,5 +1,10 @@
 """
-🪙 Coin Alert System v5.55 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.56 — Upbit KRW 자동매매
+
+v5.56: DCA 2회 확대 (2026-03-29)
+- [핵심] DCA_MAX_ADDS 1→2회 — 1차(-10%), 2차(-20%) 평단 낮춤
+- [근거] 25종목 200일 백테스트: 승률 84→90%, MDD 18.7→8.2%, 실현 -11.8→-0.9%
+- [안전] 5%×3=15% 최대 노출, SL 없는 전략에서 평단 최적화
 
 v5.55: ML 피처 확장 (2026-03-28)
 - [ML] _build_webhook_extra() 피처 추가: sl_distance_pct(손절선 여유), pnl_per_day(일당 수익률)
@@ -638,10 +643,9 @@ INITIAL_BUY_RATIO      = 0.5     # v5.53: 60→50% (DCA 여력 확보 — SL 없
                                  # 대원칙3 "충분히 떨어졌을 때만 진입" — 분할로 추격 리스크 분산
 DCA_ENABLED            = True    # v4.0: 분할매수 활성화
 DCA_DROP_PCT           = 10.0    # v5.53: 7→10% (SL 없으므로 더 떨어진 후 DCA — 평단 최대한 낮춤)
-DCA_MAX_ADDS           = 1       # v4.7: 2→1회 (실전: 2회 DCA 시 총 노출 200%, 실질 DD -12.5%)
-                                 # 근거: 1회 DCA = 총 150% 노출, 실질 최대 DD -7.5%로 제한
-                                 # 하락 추세에서 3레이어 동시 손실 방지 (대원칙2 준수)
-                                 # TREND_FILTER와 결합: 120MA 아래 시 DCA 0회(진입만)
+DCA_MAX_ADDS           = 2       # v5.56: 1→2회 (백테스트: 승률 84→90%, MDD 18.7→8.2%, 실현 -11.8→-0.9%)
+                                 # 1차 DCA -10%, 2차 DCA -20% → 평단 크게 낮춰 작은 반등에도 TP1 도달
+                                 # SL 없는 전략에서 DCA 2회는 5%×3=15% 최대 노출로 안전
 DCA_ADD_RATIO          = 0.5     # v5.17: 기존 50%는 fallback용 (full_position_krw 없는 레거시 포지션)
                                  # 신규 포지션: full_position_krw - 현재보유금액 = 잔여분 자동 계산
 
