@@ -3275,8 +3275,9 @@ def main():
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
+                                _ec = capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg)
                                 record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL",
-                                            entry_context=capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg))
+                                            entry_context=_ec)
                                 pending_exposure += proposed_pct
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
@@ -3288,6 +3289,7 @@ def main():
                                     "entry_date": utc_now().isoformat(),
                                     "dca_count": 0,
                                     "full_position_krw": full_krw,  # v5.17: DCA 잔여분 계산용
+                                    "entry_context": _ec,  # ML 피처 스냅샷
                                 }
                                 portfolio_tickers.add(ticker)
                                 split_pct = INITIAL_BUY_RATIO * 100
