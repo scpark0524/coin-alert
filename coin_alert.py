@@ -1,5 +1,18 @@
 """
-🪙 Coin Alert System v5.56 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.60 — Upbit KRW 자동매매
+
+v5.60: Quick Fix 적용 (2026-03-30)
+- [Quick Fix] MAX_CONCURRENT_POSITIONS 20→30 (1차 정의)
+- [Quick Fix] 버전 태그 업데이트
+
+v5.59: 동시보유 30종목 확대 (2026-03-30)
+- [확장] MAX_CONCURRENT_POSITIONS 20→30 — 매매 히스토리 축적 가속
+- [근거] 첫매수 2.5%/종목 × 30 = 75% < 85% 노출상한, SL 없는 전략이므로 안전
+- [목적] ML 학습 데이터 확보를 위한 거래 건수 극대화
+
+v5.58: Quick Fix 적용 (2026-03-30)
+- [Quick Fix] ML webhook 피처 확장 — 청산 시점 점수 분해 + 시장 미시구조 (Priority 1)
+- [Quick Fix] ML 진입 컨텍스트 피처 확장 — 진입 시점 점수 분해 (Priority 1 보완)
 
 v5.56: DCA 2회 확대 (2026-03-29)
 - [핵심] DCA_MAX_ADDS 1→2회 — 1차(-10%), 2차(-20%) 평단 낮춤
@@ -527,13 +540,13 @@ MAX_PORTFOLIO_EXPOSURE  = 0.85   # v5.20.1: 80→85% (DCA 여력 15% 확보 + �
                                  # 근거: 8종목×12%=96% → 85%에서 7종목까지 진입, DCA 여력 15%
                                  # 80%는 과보수적 — Churn 근절(v5.20.1) 후 추가 기회 확보 필요
                                  # 대원칙1 "수익 극대화" + 대원칙5 "하락장에서 포지션 구축" 균형
-MAX_CONCURRENT_POSITIONS = 20    # v5.53: 12→20 (손절 없는 분산 전략 — 잘게 쪼개서 반등 대기)
-                                 # 근거: v5.18이 줄인 이유는 "연쇄 SL"이었으나 실제 원인은 신호매도 Churn
-                                 # v5.20.1에서 손실 구간 신호매도 완전 차단 → Churn 없이 8종목 분산 가능
-                                 # 최악 시나리오: 8 × 60만 × SL(-5%) = -24만원(-4.8%)
-                                 # MDD(15%)까지 10.2%p 여유 — 안전 마진 충분
-                                 # 500만원 투입 목적: 다종목 매매 히스토리 축적 → 로직 강화
-                                 # 대원칙1 "수익 극대화" — 진입 기회 확대, 자본 효율 개선
+MAX_CONCURRENT_POSITIONS = 30    # v5.59: 20→30 (매매 히스토리 축적 가속 — 테스트 건수 확보 우선)
+                                 # 근거: 5%×50%(첫매수)=2.5%/종목, 30×2.5%=75% < 85% 노출 상한
+                                 # SL 제거 전략(30%)이므로 연쇄 SL 리스크 없음
+                                 # 최악 시나리오: 30 × 12.5만 × CATASTROPHIC(-30%) = -112.5만(-22.5%)
+                                 # → 실제로는 DCA 2회 + 180일 보유로 반등 대기
+                                 # 목적: 다종목 매매 히스토리 축적 → ML 학습 데이터 확보
+                                 # 대원칙1 "수익 극대화" — 진입 기회 최대화, 거래 빈도 확대
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -1100,6 +1113,11 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         "entry_price_percentile": round(result.get("full_percentile", 50), 1),
         # BB 위치 (0=하단, 1=상단)
         "bb_position": 0.5,
+        # [C] v5.57: 점수 분해 (ML 인과분석 — 어떤 전략이 진입을 주도했는지)
+        "entry_scoring_pts": round(result.get("entry_score", 0)),
+        "entry_trend_score": round(result.get("trend_score", 0), 1),
+        "entry_mean_rev_score": round(result.get("mean_rev_score", 0), 1),
+        "entry_momentum_score": round(result.get("momentum_pred_score", 0), 1),
         # [D] 시장 컨텍스트
         "entry_regime": regime_info.get("regime", ""),
         "btc_change_pct": 0,
@@ -1224,6 +1242,18 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "sl_distance_pct": round(LOSS_CUT_PCT - abs(min(pnl_pct, 0)), 2),
         "position_age_days": round(hold_hours / 24, 2),
         "pnl_per_day": round(pnl_pct / max(hold_hours / 24, 0.04), 4),
+        # [I] v5.57: ML 피처 확장 — 점수 분해 + 시장 미시구조 (Gemini Priority 1)
+        "exit_trend_score": round(r.get("trend_score", 0), 1),
+        "exit_mean_rev_score": round(r.get("mean_rev_score", 0), 1),
+        "exit_momentum_score": round(r.get("momentum_pred_score", 0), 1),
+        "exit_ensemble_score": round(r.get("ensemble_score", 0), 1),
+        "exit_bb_position": round(
+            (price - r.get("bb_lower", price))
+            / max(r.get("bb_upper", price) - r.get("bb_lower", price), 0.001), 3
+        ),
+        "exit_volume_ratio": round(r.get("volume_ratio", 1.0), 2),
+        "exit_confidence": round(r.get("confidence", 0), 1),
+        "exit_volume_24h": r.get("volume_24h", 0),
     }
 
 
