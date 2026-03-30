@@ -617,6 +617,11 @@ RISK_SL_LOOKBACK_HOURS = 6  # 최근 6시간 내 연속 SL 카운트
 # v5.20.1: DAILY_LOSS_LIMIT_PCT, MAX_SL_PER_DAY 제거
 # 이유: 대원칙5 "하락장에서 포지션 구축" — SL 발동 후가 오히려 저점 매수 기회
 # 매수 차단은 대원칙1 "수익 극대화"에 위배. 개별 종목 리스크는 SL(-5%)이 담당.
+# v5.60: 자금 효율 관리 (손절 아님 — 죽은 포지션 정리)
+STUCK_ALERT_RATIO    = 0.8      # 미실현 손실 포지션이 전체의 80% 넘으면 텔레그램 알림
+STUCK_CLEANUP_DAYS   = 90       # 90일 이상 보유 + high_pnl < 1% → 소형주만 정리
+STUCK_CLEANUP_MIN_VOL = 5e9     # 정리 대상: 24h 거래대금 50억 미만 (대형주 제외)
+
 REBUY_DROP_PCT       = 3.0      # v4.2: 5→3% (평균회귀 사이클에 맞는 재진입 허용)
 STOP_COOLDOWN_HOURS  = 4        # v5.7: 6→4h (실매수 미체결 대응 — 야간 손절 후 오전 차단 해소)
                                 # 근거: 6h는 새벽 손절 시 오전 세션 진입 차단 (03시SL→09시해제)
@@ -3395,6 +3400,88 @@ def main():
         print(f"   보유: {[t.replace('KRW-', '') for t in holdings]}")
     else:
         print("   보유 없음")
+
+    # v5.60: 묶임 비율 모니터링 — 미실현 손실 포지션 비율 체크
+    if holdings and AUTO_TRADE_ENABLED:
+        stuck_count = 0
+        for _t in holdings:
+            _pos = portfolio[_t]
+            _ep = _pos.get("entry_price", 0)
+            # 현재가 조회 (results에서)
+            _cp = 0
+            for _r in results:
+                if _r["ticker"] == _t and _r.get("price"):
+                    _cp = _r["price"]
+                    break
+            if _ep > 0 and _cp > 0 and _cp < _ep:
+                stuck_count += 1
+        stuck_ratio = stuck_count / len(holdings) if holdings else 0
+        if stuck_ratio >= STUCK_ALERT_RATIO:
+            print(f"   🚨 묶임 경고: {stuck_count}/{len(holdings)}종목({stuck_ratio*100:.0f}%)이 미실현 손실")
+            send_telegram(
+                f"🚨 <b>묶임 경고</b>\n"
+                f"미실현 손실: {stuck_count}/{len(holdings)}종목 ({stuck_ratio*100:.0f}%)\n"
+                f"신규 매수 자금 부족 위험")
+        elif stuck_count > 0:
+            print(f"   📊 미실현 손실: {stuck_count}/{len(holdings)}종목 ({stuck_ratio*100:.0f}%)")
+
+    # v5.60: 장기 미회복 종목 자동 정리 — 90일+ 보유 & high_pnl < 1% & 소형주
+    if holdings and AUTO_TRADE_ENABLED:
+        now = utc_now()
+        for _t in list(holdings):
+            _pos = portfolio[_t]
+            _ed = _pos.get("entry_date", "")
+            if not _ed or _ed == "synced":
+                continue
+            try:
+                _entry_dt = datetime.fromisoformat(_ed)
+                if _entry_dt.tzinfo is None:
+                    _entry_dt = _entry_dt.replace(tzinfo=timezone.utc)
+                _hold_days = (now - _entry_dt).total_seconds() / 86400
+            except (ValueError, TypeError):
+                continue
+            if _hold_days < STUCK_CLEANUP_DAYS:
+                continue
+            _high = _pos.get("high_pnl", 0)
+            if _high >= 1.0:
+                continue  # 한 번이라도 +1% 찍은 적 있으면 보류
+            # 거래대금 체크 — 대형주는 정리 안 함
+            _vol = 0
+            for _r in results:
+                if _r["ticker"] == _t:
+                    _vol = _r.get("volume_24h", 0)
+                    break
+            if _vol >= STUCK_CLEANUP_MIN_VOL:
+                continue  # 거래대금 50억+ = 대형주 → 보류
+            # 정리 대상
+            _name = _t.replace("KRW-", "")
+            _ep = _pos.get("entry_price", 0)
+            _cp = 0
+            for _r in results:
+                if _r["ticker"] == _t and _r.get("price"):
+                    _cp = _r["price"]
+                    break
+            _pnl = (_cp / _ep - 1) * 100 if _ep > 0 and _cp > 0 else 0
+            _vol_pos = _pos.get("volume", 0)
+            print(f"   🗑️ {_name} 장기 미회복 정리: {_hold_days:.0f}일 보유, high_pnl={_high:+.1f}%, 현재 PnL={_pnl:+.1f}%")
+            if can_trade and _vol_pos > 0:
+                order = execute_sell(_t, _vol_pos)
+                if order:
+                    record_order(order_log, _t, "SELL")
+                    record_trade(_t, "SELL", _cp, _vol_pos, _vol_pos * _cp, "STUCK_CLEANUP", _ep, _pnl)
+                    _send_trade_analysis_webhook(
+                        _t, "SELL", _cp, _vol_pos, _vol_pos * _cp, "STUCK_CLEANUP", _ep, _pnl,
+                        extra_data=_build_webhook_extra(_pos, {"rsi": 0, "adx": 0, "atr": 0, "price": _cp, "ensemble_score": 0},
+                                                        _hold_days * 24, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, _pnl)
+                    )
+                    signal_fired = True
+                    del portfolio[_t]
+                    send_telegram(
+                        f"🗑️ <b>{_name}</b> 장기 미회복 정리\n"
+                        f"{_hold_days:.0f}일 보유, 반등 없음 (high_pnl={_high:+.1f}%)\n"
+                        f"PnL {_pnl:+.1f}% | 자금 회수")
+
+    save_portfolio(portfolio)
 
     # v3.2: VM은 매수/매도 시에만 텔레그램, 리포트는 GitHub Actions(알림 모드)에서만
     if not signal_fired and not AUTO_TRADE_ENABLED:
