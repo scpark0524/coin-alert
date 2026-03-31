@@ -549,12 +549,12 @@ MAX_POSITION_PCT        = 0.05   # v5.53: 12→5% (손절 없는 분산 전략 �
                                  # 5종목 × 20% = 100% → MAX_PORTFOLIO_EXPOSURE(80%)로 상한 유지
                                  # 외부 고문: "농도 짙은 매매가 관리 효율 면에서 우월"
 MIN_POSITION_PCT        = 0.01
-MAX_PORTFOLIO_EXPOSURE  = 0.85   # v5.20.1: 80→85% (DCA 여력 15% 확보 + 자본 효율 개선)
-                                 # 근거: 8종목×12%=96% → 85%에서 7종목까지 진입, DCA 여력 15%
-                                 # 80%는 과보수적 — Churn 근절(v5.20.1) 후 추가 기회 확보 필요
+MAX_PORTFOLIO_EXPOSURE  = 0.90   # v5.62: 85→90% (30종목 보유 한도 실현 — 3.5%×25=87.5%)
+                                 # 근거: 5%×70%(첫매수)=3.5%/종목, 30×3.5%=105% 이론상한
+                                 # 90%에서 ~25종목 진입 가능, DCA 여력 10% 확보
                                  # 대원칙1 "수익 극대화" + 대원칙5 "하락장에서 포지션 구축" 균형
 MAX_CONCURRENT_POSITIONS = 30    # v5.59: 20→30 (매매 히스토리 축적 가속 — 테스트 건수 확보 우선)
-                                 # 근거: 5%×50%(첫매수)=2.5%/종목, 30×2.5%=75% < 85% 노출 상한
+                                 # 근거: 5%×70%(첫매수)=3.5%/종목, 90% 노출 한도에서 ~25종목 진입
                                  # SL 제거 전략(30%)이므로 연쇄 SL 리스크 없음
                                  # 최악 시나리오: 30 × 12.5만 × CATASTROPHIC(-30%) = -112.5만(-22.5%)
                                  # → 실제로는 DCA 2회 + 180일 보유로 반등 대기
@@ -855,10 +855,10 @@ def validate_pre_trade(ticker, portfolio, order_log, is_dca=False):
 
     # Gate 1: 포지션 한도 (신규 진입 시만 — D3 방지)
     if not is_dca:
-        positions = (portfolio or {}).get('positions', {})
+        # v5.62: portfolio 구조에 맞게 수정 — _meta/_sell_memory 제외한 실제 포지션 카운트
         active_count = sum(
-            1 for p in positions.values()
-            if isinstance(p, dict) and p.get('status') == 'active'
+            1 for k, v in (portfolio or {}).items()
+            if k not in ("_meta", "_sell_memory") and isinstance(v, dict)
         )
         if active_count >= cfg['max_concurrent']:
             errors.append(
@@ -2837,10 +2837,13 @@ def main():
     _wh_fg = fg.get("score", 0) if fg else 0
     _wh_rising = sum(1 for _r in results if _r.get("daily_change", 0) > 0 and _r["signal"] != "NO_DATA")
     portfolio_tickers  = {k for k in portfolio if k not in ("_meta", "_sell_memory")}
+    # v5.62: 실제 투자금(entry_price × volume) 기준 노출 계산
+    # 기존: 현재가 기준 → 하락장에서 과소평가, results에 없는 종목 누락
+    # 변경: entry_price 기준 → 실제 투입 자본 비중 정확 반영
     total_exposure     = sum(
-        portfolio[t].get("volume", 0) * r["price"] / total_capital
-        for r in results if r["signal"] != "NO_DATA"
-        for t in [r["ticker"]] if t in portfolio
+        pos.get("entry_price", 0) * pos.get("volume", 0) / total_capital
+        for t, pos in portfolio.items()
+        if t not in ("_meta", "_sell_memory") and isinstance(pos, dict)
     ) if total_capital > 0 else 0
     pending_buy_tickers = []
     pending_exposure   = 0.0
@@ -2895,7 +2898,7 @@ def main():
                         pos["volume"] = vol - sell_vol
                         signal_fired = True
                         sold_value = sell_vol * r["price"]
-                        total_exposure = max(0, total_exposure - sold_value / total_capital)
+                        total_exposure = max(0, total_exposure - sell_vol * entry_p / total_capital)
                         capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                         send_telegram(
                             f"💰 <b>{name}</b> TP1 익절 ({PARTIAL_SELL_RATIO_1*100:.0f}%)\n"
@@ -2923,7 +2926,7 @@ def main():
                         pos["volume"] = vol - sell_vol
                         signal_fired = True
                         sold_value = sell_vol * r["price"]
-                        total_exposure = max(0, total_exposure - sold_value / total_capital)
+                        total_exposure = max(0, total_exposure - sell_vol * entry_p / total_capital)
                         capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                         send_telegram(
                             f"💰 <b>{name}</b> TP2 익절 (잔여의 {PARTIAL_SELL_RATIO_2*100:.0f}%)\n"
@@ -3001,7 +3004,7 @@ def main():
                                 signal_fired = True
                                 partial_sl1_done = True
                                 sold_value = sell_vol * r["price"]
-                                total_exposure = max(0, total_exposure - sold_value / total_capital)
+                                total_exposure = max(0, total_exposure - sell_vol * entry_p / total_capital)
                                 capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                                 send_telegram(
                                     f"🛡️ <b>{name}</b> 분할손절 1단계 ({PARTIAL_SL_RATIO*100:.0f}%)\n"
@@ -3069,7 +3072,7 @@ def main():
                                 pos["volume"] = vol - sell_vol
                                 signal_fired = True
                                 sold_value = sell_vol * r["price"]
-                                total_exposure = max(0, total_exposure - sold_value / total_capital)
+                                total_exposure = max(0, total_exposure - sell_vol * entry_p / total_capital)
                                 capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                                 send_telegram(
                                     f"📊 <b>{name}</b> RSI 분할익절 ({PARTIAL_SELL_RATIO_1*100:.0f}%)\n"
@@ -3248,16 +3251,19 @@ def main():
                 name            = ticker.replace("KRW-", "")
 
                 # v2.3: 노출 한도 내로 포지션 자동 축소
+                # v5.62: 실제 매수 비율(INITIAL_BUY_RATIO) 기준으로 노출 계산
+                actual_buy_pct  = proposed_pct * INITIAL_BUY_RATIO
                 remaining = max(0, MAX_PORTFOLIO_EXPOSURE - total_exposure - pending_exposure)
                 max_addable = remaining / corr_penalty if corr_penalty > 0 else remaining
-                if proposed_pct > max_addable and max_addable >= MIN_POSITION_PCT:
-                    old_pct = proposed_pct
-                    proposed_pct = max_addable
+                if actual_buy_pct > max_addable and max_addable >= MIN_POSITION_PCT:
+                    old_pct = actual_buy_pct
+                    actual_buy_pct = max_addable
+                    proposed_pct = actual_buy_pct / INITIAL_BUY_RATIO
                     ps = {**ps, "position_pct": proposed_pct * 100,
                           "position_krw": total_capital * proposed_pct}
-                    print(f"   📐 {name} 포지션 축소: {old_pct*100:.0f}% → {proposed_pct*100:.0f}% (노출 한도 맞춤)")
+                    print(f"   📐 {name} 포지션 축소: {old_pct*100:.0f}% → {actual_buy_pct*100:.0f}% (노출 한도 맞춤)")
 
-                effective_exp   = total_exposure + (pending_exposure + proposed_pct) * corr_penalty
+                effective_exp   = total_exposure + (pending_exposure + actual_buy_pct) * corr_penalty
 
                 if effective_exp > MAX_PORTFOLIO_EXPOSURE:
                     print(f"   ⚠️ {name} 노출 여유 부족 ({remaining*100:.1f}% 잔여) — 매수 불가")
@@ -3305,7 +3311,7 @@ def main():
                                 _ec = capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg)
                                 record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL",
                                             entry_context=_ec)
-                                pending_exposure += proposed_pct
+                                pending_exposure += buy_krw / total_capital  # v5.62: 실제 매수금 기준
                                 pending_buy_tickers.append(ticker)
                                 signal_fired = True
                                 # v3.3 fix: 매수 즉시 portfolio에 추가 (entry_date 보존)
@@ -3331,7 +3337,7 @@ def main():
                                 send_telegram(f"❌ <b>{name}</b> 매수 주문 실패 — 수동 확인 필요")
                     else:
                         signal_fired = True
-                        pending_exposure += proposed_pct
+                        pending_exposure += proposed_pct * INITIAL_BUY_RATIO  # v5.62: 실제 매수 비율 반영
                         pending_buy_tickers.append(ticker)
                         print(f"   📋 {name} 매수 신호 ({'장외 — 주문 미실행' if not cb_triggered else '서킷브레이커'})")
 
@@ -3382,9 +3388,10 @@ def main():
                             portfolio["_sell_memory"] = sell_memory
                             # 매도 후 포트폴리오/노출/자본 즉시 갱신
                             sold_value = vol * r["price"]
+                            entry_cost = vol * entry_p  # v5.62: entry 기준 exposure 차감
                             del portfolio[ticker]
                             portfolio_tickers.discard(ticker)
-                            total_exposure = max(0, total_exposure - sold_value / total_capital)
+                            total_exposure = max(0, total_exposure - entry_cost / total_capital)
                             capital += sold_value * (1 - TOTAL_COST_BPS / 10000)
                             send_telegram(
                                 f"📤 <b>{name}</b> 매도 주문 접수 ({close_reason})\n"
