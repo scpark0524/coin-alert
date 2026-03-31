@@ -1,5 +1,11 @@
 """
-🪙 Coin Alert System v5.60 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.62 — Upbit KRW 자동매매
+
+v5.62: Quick Fix 적용 (2026-03-31)
+- [Quick Fix] ML_SCORE_WEIGHTS — time_efficiency 가중치 하향 (Priority 1)
+- [Quick Fix] Webhook ML 파생 피처 3종 추가 (Priority 1)
+- [Quick Fix] CATASTROPHIC_STOP_PCT 30→20% — 계층 방어 복원 (Priority 3, F1 전원합의)
+- [Quick Fix] 스테이블코인 자동 제외 필터 (Priority 4, F5 전원합의)
 
 v5.60: Quick Fix 적용 (2026-03-30)
 - [Quick Fix] MAX_CONCURRENT_POSITIONS 20→30 (1차 정의)
@@ -411,7 +417,9 @@ def _fetch_excluded_tickers():
     return warned, cautioned
 
 def fetch_krw_tickers():
-    """Upbit KRW 마켓 전종목 자동 조회. 투자유의/위험 종목 제외. 실패 시 폴백."""
+    """Upbit KRW 마켓 전종목 자동 조회. 투자유의/위험/스테이블 종목 제외. 실패 시 폴백."""
+    # v5.61: 스테이블코인 자동 제외 (F5 — 평균회귀 전략 부적합, 일간변동 <0.5%)
+    STABLECOINS = {"USDT", "USDC", "DAI", "TUSD", "BUSD"}
     try:
         tickers = pyupbit.get_tickers(fiat="KRW")
         if tickers and len(tickers) > 10:
@@ -423,6 +431,11 @@ def fetch_krw_tickers():
                     print(f"   ⚠️ 투자유의 제외: {', '.join(t.replace('KRW-','') for t in warned)}")
                 if cautioned:
                     print(f"   🚫 투자위험 제외: {', '.join(t.replace('KRW-','') for t in cautioned)} (해외괴리/소액집중)")
+            # v5.61: 스테이블코인 필터 (변동성 부족 → TP1 미도달, 자본 묶임)
+            stable_found = [t for t in tickers if t.replace("KRW-", "") in STABLECOINS]
+            if stable_found:
+                tickers = [t for t in tickers if t.replace("KRW-", "") not in STABLECOINS]
+                print(f"   🔇 스테이블코인 제외: {', '.join(t.replace('KRW-','') for t in stable_found)}")
             print(f"   ✅ Upbit KRW 전종목 조회: {len(tickers)}종목")
             return tickers
     except Exception as e:
@@ -599,12 +612,13 @@ PARTIAL_SL_2ND_PCT     = 6.0    # SL 2단계: -6% → 나머지 전량 매도 (�
                                 # 근거: 1단계(-4%) 후 2%p 추가 하락 = 구조적 하락 판단
 PARTIAL_SL_RATIO       = 0.5    # 1단계 매도 비율 (50%)
                                 # 백테스트: SL 평균 -5.83% → -2.68% (54% 감소)
-CATASTROPHIC_STOP_PCT = 30.0    # v5.53: 10→30% (상폐/급락 방어만 — 일반 SL 제거)
-                                # 근거: 10% = SL(-4%) 대비 2.5배, 갭다운 슬리피지 포함 커버
-                                # SAHARA 교훈: -100% 도달 전 -10%에서 차단했으면 손실 1/10
-                                # 일반 SL(-4%)과 6%p 간격 → 정상 변동/DCA에 간섭 없음
+CATASTROPHIC_STOP_PCT = 20.0    # v5.61: 30→20% (F1 전원합의 — LOSS_CUT 30%와 계층 분리)
+                                # 근거: CATASTROPHIC=LOSS_CUT=30%는 계층 방어 소멸
+                                # 20% = DCA 2회(-10%,-20%) 평단 이후에도 적정 방어선
+                                # LOSS_CUT(30%)과 10%p 간격 → 중간 방어선 역할 복원
+                                # 최악 시나리오: 30종목×12.5만×20% = -75만(-15%)
                                 # 즉시 시장가 전량 매도, MIN_HOLD_HOURS 무시
-                                # 대원칙2 "손절은 최후의 수단" — 10%는 구조적 붕괴 임계
+                                # 대원칙2 "손절은 최후의 수단" — 20%는 구조적 붕괴 임계
 
 # v5.48 신설: 단계별 리스크 레벨 (서킷브레이커 사전 대응)
 RISK_LEVEL_1_DD = 3.0     # Level 1 (주의): 일일 DD -3% 또는 SL 2연속
@@ -721,7 +735,11 @@ ORDER_COOLDOWN_MINUTES = 60   # v5.7: 120→60분 (실매수 미체결 대응 �
 # ML 학습 데이터 수집 설정 (v5.52)
 ML_FEATURE_LOG      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_features.jsonl")
 ML_MIN_SAMPLES      = 100
-ML_SCORE_WEIGHTS    = {"pnl": 0.4, "time_efficiency": 0.2, "risk_adjusted": 0.3, "regime_fit": 0.1}
+ML_SCORE_WEIGHTS    = {"pnl": 0.4, "time_efficiency": 0.1, "risk_adjusted": 0.3, "regime_fit": 0.2}
+                    # v5.61: time_efficiency 0.2→0.1, regime_fit 0.1→0.2
+                    # 근거: Codex/Gemini — 빠른 거래 과대평가 편향 제거
+                    # 장기 보유(DCA 2회+180일) 품질을 공정하게 평가
+                    # regime_fit 상향 → 시장 맥락에 맞는 거래 학습 강화
 MIN_SIGNAL_CANDLES  = 120   # 450봉 미달 종목 폴백 (RSI14 + BB20 + 여유분)
 
 # 파일 경로
@@ -1259,6 +1277,10 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "exit_volume_ratio": round(r.get("volume_ratio", 1.0), 2),
         "exit_confidence": round(r.get("confidence", 0), 1),
         "exit_volume_24h": r.get("volume_24h", 0),
+        # [J] v5.61: ML 파생 피처 — 인과분석 + 레짐 변화 감지
+        "rsi_delta": round(r.get("rsi", 50) - ec.get("entry_rsi", r.get("rsi", 50)), 1),
+        "intra_trade_drawdown": round(max(0, pos.get("high_pnl", 0) - pnl_pct), 2) if isinstance(pos, dict) else 0,
+        "regime_changed": 1 if ec.get("entry_regime", exit_regime) != exit_regime else 0,
     }
 
 
@@ -1425,7 +1447,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.49"
+        meta["version"] = "5.62"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -2499,7 +2521,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v5.48</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v5.62</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
