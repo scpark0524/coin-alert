@@ -1,4 +1,4 @@
-# Coin Alert v5.70 — Upbit KRW 시스템 매매
+# Coin Alert v5.71 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -215,7 +215,7 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 
 ---
 
-## 주요 파라미터 (v5.70)
+## 주요 파라미터 (v5.71)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)
@@ -234,7 +234,8 @@ STUCK_HOURS_THRESHOLD      = 168h         (7일 이상 보유 → stuck)
 
 PARTIAL_SL_ENABLED         = False        (분할 손절 비활성)
 LOSS_CUT_PCT               = 30%          (상폐 방어만)
-CATASTROPHIC_STOP_PCT      = 30%          (상폐 방어만)
+CATASTROPHIC_STOP_PCT      = 30%          (상폐 방어만 — v5.71: 20→30% 복원)
+TP1_BREAKEVEN_SL           = False        (v5.71: TP1 후 잔여분 버티기)
 MAX_HOLD_DAYS              = 180          (사실상 무제한)
 
 PROFIT_TARGET_1ST          = 레짐별       (TP1: BEAR 2% ~ BULL 4%)

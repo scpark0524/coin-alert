@@ -1,5 +1,9 @@
 """
-🪙 Coin Alert System v5.70 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.71 — Upbit KRW 자동매매
+
+v5.71: 손절 완화 — CATASTROPHIC 30% 복원 + BREAKEVEN_SL 비활성 (2026-04-04)
+- [수정] CATASTROPHIC_STOP_PCT 20→30% 복원 (KAT -20.5% 조기손절 방지)
+- [수정] TP1_BREAKEVEN_SL False (TP1 50% 확보 후 잔여분 버티기, ALT +3.4% 회복 사례)
 
 v5.70: Quick Fix 적용 (2026-04-04)
 - [Quick Fix] ML 분류 상수 신설
@@ -556,7 +560,7 @@ MIN_ENTRY_SCORE     = 6        # v5.39: 5→6 (기본값, 레짐별 get_regime_s
                                # 5점 = RSI 과매도
 
 # R:R 구조 개선 (v5.37 신설)
-TP1_BREAKEVEN_SL    = True     # v5.37: TP1 발동 후 잔여 포지션 SL→진입가 이동
+TP1_BREAKEVEN_SL    = False    # v5.71: 비활성화 — TP1 50% 확보 후 잔여분 버티기 (ALT +3.4% 회복 사례)
                                # 근거: TP1(3%) 50% 매도 후, 잔여 50%가 SL(-5%)로 손실 전환 방지
                                # 수리적: TP1 후 반전 시 순손익 -1.0%→+1.5% (R:R 구조 정상화)
                                # 대원칙2 "손절 최소화" — 이익 확정 포지션의 손실 전환 차단
@@ -661,7 +665,7 @@ PARTIAL_SL_2ND_PCT     = 6.0    # SL 2단계: -6% → 나머지 전량 매도 (�
                                 # 근거: 1단계(-4%) 후 2%p 추가 하락 = 구조적 하락 판단
 PARTIAL_SL_RATIO       = 0.5    # 1단계 매도 비율 (50%)
                                 # 백테스트: SL 평균 -5.83% → -2.68% (54% 감소)
-CATASTROPHIC_STOP_PCT = 20.0    # v5.61: 30→20% (F1 전원합의 — LOSS_CUT 30%와 계층 분리)
+CATASTROPHIC_STOP_PCT = 30.0    # v5.71: 20→30% 복원 — KAT -20.5% 조기손절 방지, 상폐 방어만 유지
                                 # 근거: CATASTROPHIC=LOSS_CUT=30%는 계층 방어 소멸
                                 # 20% = DCA 2회(-10%,-20%) 평단 이후에도 적정 방어선
                                 # LOSS_CUT(30%)과 10%p 간격 → 중간 방어선 역할 복원
@@ -1592,7 +1596,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.69"
+        meta["version"] = "5.71"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
