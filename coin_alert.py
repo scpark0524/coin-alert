@@ -1298,8 +1298,25 @@ def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price
     _save_trade_history(history)
 
 
-def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason, entry_price, pnl_pct, extra_data=None):
-    """매도 체결 시 오케스트레이터에 분석 webhook 발송 (비동기, 실패 시 로그 출력)."""
+def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason, entry_price, pnl_pct,
+                                  extra_data=None, candles_df=None, entry_context=None):
+    """매도 체결 시 오케스트레이터에 분석 webhook 발송 + JSONL 로깅 (비동기, 실패 시 로그 출력)."""
+    # JSONL 로깅 — build_trade_features 호출 (v5.70: 호출부 연결)
+    try:
+        _ec = entry_context or (extra_data or {})
+        build_trade_features(
+            ticker=ticker, action=side, entry_price=entry_price, exit_price=price,
+            pnl_pct=pnl_pct,
+            holding_hours=(extra_data or {}).get("hold_hours", 0),
+            regime=(extra_data or {}).get("exit_regime", ""),
+            entry_score=_ec.get("entry_score", 0),
+            candles_df=candles_df,
+            entry_context=entry_context,
+            max_pnl=(extra_data or {}).get("max_pnl_during_hold"),
+            btc_change_pct=(extra_data or {}).get("btc_change_pct"),
+        )
+    except Exception as e:
+        print(f"   ⚠️ {ticker.replace('KRW-','')} JSONL 로깅 실패: {e}")
     if not ORCHESTRATOR_URL:
         return  # 환경변수 미설정 시 무시 (GitHub Actions 등)
     try:
@@ -3036,7 +3053,8 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP1", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct),
+                            candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP1 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -3064,7 +3082,8 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP2", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct),
+                            candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                         )
                 elif not can_trade:
                     print(f"   💰 {name} TP2 도달 +{pnl_pct:.1f}% (자동매매 비활성)")
@@ -3125,7 +3144,8 @@ def main():
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                                     "PARTIAL_SL1", entry_p, pnl_pct,
-                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct)
+                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct),
+                                    candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                                 )
                                 pos["sl_partial_done"] = True
                                 pos["volume"] = vol - sell_vol
@@ -3212,7 +3232,8 @@ def main():
                                 _extra["exit_rsi"] = round(cur_rsi, 1)  # RSI_SELL은 청산 RSI가 별도
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
-                                    "RSI_SELL_TP1", entry_p, pnl_pct, extra_data=_extra
+                                    "RSI_SELL_TP1", entry_p, pnl_pct, extra_data=_extra,
+                                    candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                                 )
                         elif not can_trade:
                             print(f"   📊 {name} RSI 과매수 감지 (PnL {pnl_pct:+.1f}%, 자동매매 비활성)")
@@ -3497,10 +3518,12 @@ def main():
                                     _hold_h = round((utc_now() - _edt).total_seconds() / 3600, 1)
                             except Exception:
                                 pass
+                            _sell_ec = portfolio.get(ticker, {}).get("entry_context")
                             _send_trade_analysis_webhook(
                                 ticker, "SELL", r["price"], vol, vol * r["price"],
                                 close_reason, entry_p, pnl,
-                                extra_data=_build_webhook_extra(portfolio.get(ticker, {}), r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl)
+                                extra_data=_build_webhook_extra(portfolio.get(ticker, {}), r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl),
+                                candles_df=signal_data.get(ticker), entry_context=_sell_ec,
                             )
                             # v3.3 fix: 손실 매도 시 원인 불문 쿨다운 (스탑/시그널/시간 모두)
                             if pnl < 0:
@@ -3629,7 +3652,8 @@ def main():
                     _send_trade_analysis_webhook(
                         _t, "SELL", _cp, _vol_pos, _vol_pos * _cp, "STUCK_CLEANUP", _ep, _pnl,
                         extra_data=_build_webhook_extra(_pos, {"rsi": 0, "adx": 0, "atr": 0, "price": _cp, "ensemble_score": 0},
-                                                        _hold_days * 24, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, _pnl)
+                                                        _hold_days * 24, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, _pnl),
+                        candles_df=signal_data.get(_t), entry_context=_pos.get("entry_context"),
                     )
                     signal_fired = True
                     del portfolio[_t]
