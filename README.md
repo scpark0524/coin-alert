@@ -1,4 +1,4 @@
-# Coin Alert v5.56 — Upbit KRW 시스템 매매
+# Coin Alert v5.70 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -19,7 +19,7 @@ Upbit 전종목 스캔 (~242종목)
   → 매수 실행 (5% × 20종목 분산)
   → 보유: TP 도달까지 대기 (최대 180일)
   → 매도: 익절만 실행 (-30% 상폐 방어 제외)
-  → 매매 분석 webhook → ML 피처 37컬럼 축적
+  → 매매 분석 webhook → ML 피처 45+컬럼 축적
 ```
 
 | 항목 | 값 |
@@ -176,16 +176,18 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 
 ---
 
-## ML 매매 분석 (v5.52)
+## ML 매매 분석 (v5.52 ~ v5.70)
 
 ### 데이터 흐름
 
 ```
 매수 시: capture_entry_context() → portfolio에 entry_context 저장
 매도 시: _build_webhook_extra() → 오케스트레이터 API webhook → trade_analyses DB
+라벨링: _classify_trade() → 3-class (WIN/NEUTRAL/STUCK_LOSS) — v5.69
+품질: compute_trade_quality_score() → Alpha PnL 기반 + 경로 안정성 페널티 — v5.65
 ```
 
-### 축적 컬럼 (37개)
+### 축적 컬럼 (45+개)
 
 | 분류 | 컬럼 |
 |------|------|
@@ -194,23 +196,41 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 | **[C] 청산지표** (3) | exit_rsi, exit_adx, exit_atr_pct |
 | **[D] 시장** (5) | entry_regime, exit_regime, btc_change_pct, fear_greed, market_rising |
 | **[E] 포지션** (5) | hold_hours, dca_count, tp_level, max_pnl_during_hold, sl_partial_done |
-| **[F] 시간** (3) | entry_hour_kst, exit_hour_kst, day_of_week |
-| **[G] 라벨** (2) | score, quality_score |
+| **[F] 시간** (5) | entry_hour_kst, exit_hour_kst, day_of_week, **entry_is_night**, **exit_is_night** (v5.67) |
+| **[G] 라벨** (6) | score, quality_score, **trade_valid**, **alpha_pnl**, **trade_class** (v5.69) |
+| **[H] 리스크** (4) | sl_distance_pct, position_age_days, intra_trade_drawdown, regime_changed |
 | **메타** (4) | id, project_id, trade_timestamp, created_at |
+
+### ML 분류 라벨 (v5.69 — 3-class)
+
+| 클래스 | 조건 | 의미 |
+|--------|------|------|
+| **WIN** | PnL ≥ +2% | 설계대로 수익 실현 |
+| **NEUTRAL** | -5% ~ +2% | 노이즈/보합/회복 가능 |
+| **STUCK_LOSS** | PnL ≤ -5% & 7일+ 보유 | 구조적 진입 실패 (집중 학습 대상) |
+
+### Alpha PnL (v5.65)
+- `alpha_pnl = PnL - BTC변화율` → 시장 beta 제거, 진입 품질(alpha)만 평가
+- 경로 안정성 페널티: 보유 중 최고 PnL 대비 회수율 감점 (drawdown 10%p당 -0.15점)
 
 ---
 
-## 주요 파라미터 (v5.56)
+## 주요 파라미터 (v5.70)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)
-MAX_CONCURRENT_POSITIONS   = 20           (최대 동시 보유)
+MAX_CONCURRENT_POSITIONS   = 30           (최대 동시 보유 — v5.60)
 MAX_POSITION_PCT           = 0.05         (건당 5%)
-MAX_PORTFOLIO_EXPOSURE     = 0.85         (최대 노출 85%)
+MAX_PORTFOLIO_EXPOSURE     = 0.90         (최대 노출 90% — v5.62)
 
-INITIAL_BUY_RATIO          = 0.5          (첫 매수 50%)
+INITIAL_BUY_RATIO          = 0.7          (첫 매수 70% — v5.61)
 DCA_DROP_PCT               = 10.0%        (DCA 트리거 — -10%/-20% 2회)
 DCA_MAX_ADDS               = 2            (DCA 최대 2회 — v5.56)
+
+# ML 분류 상수 (v5.69)
+PROFIT_WIN_THRESHOLD       = 2.0%         (WIN 판정)
+STUCK_LOSS_THRESHOLD       = -5.0%        (STUCK_LOSS 판정)
+STUCK_HOURS_THRESHOLD      = 168h         (7일 이상 보유 → stuck)
 
 PARTIAL_SL_ENABLED         = False        (분할 손절 비활성)
 LOSS_CUT_PCT               = 30%          (상폐 방어만)

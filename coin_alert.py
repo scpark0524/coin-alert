@@ -1,5 +1,54 @@
 """
-🪙 Coin Alert System v5.62 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.70 — Upbit KRW 자동매매
+
+v5.70: Quick Fix 적용 (2026-04-04)
+- [Quick Fix] ML 분류 상수 신설
+- [Quick Fix] `_classify_trade()` 3-class 함수 신설
+- [Quick Fix] `build_trade_features()` 분류 라벨 추가
+- [Quick Fix] `_build_webhook_extra()` 분류 라벨 전파
+- [Quick Fix] meta 버전 태그 업데이트
+- [Quick Fix] 모듈 docstring 버전 업데이트
+
+v5.69: ML 3-class 분류 라벨 + 피처 확장 (2026-04-03)
+- [ML] _classify_trade() 신설 — 3-class 분류(WIN/NEUTRAL/STUCK_LOSS)
+- [ML] build_trade_features() — trade_class 라벨 추가 (regression+classification 이중)
+- [ML] _build_webhook_extra() — trade_class 라벨 전파
+- [ML] 분류 상수 3종 신설 (PROFIT_WIN/STUCK_LOSS/STUCK_HOURS THRESHOLD)
+- [근거] Codex/Gemini 합의: 22건 표본 5-class 과분할 → 3-class 견고
+- [근거] F2: 19/22=86.4% 손실 중 6종목 -6%~-10% 밀집 → STUCK_LOSS 분리 필수
+
+v5.68: Quick Fix 적용 (2026-04-03)
+- [Quick Fix] ML 야간 매수 피처 — capture_entry_context (F5 대응)
+- [Quick Fix] ML 야간 매수 피처 — _build_webhook_extra (F5 대응)
+- [Quick Fix] meta 버전 태그 동기화
+
+v5.66: Quick Fix 적용 (2026-04-02)
+- [Quick Fix] `compute_trade_quality_score` — Alpha PnL 기반 스코어링
+- [Quick Fix] `_build_webhook_extra` — btc_chg 전파 + alpha_pnl 피처 추가
+- [Quick Fix] `build_trade_features` — 함수 시그니처 확장 (btc_change_pct 지원)
+- [Quick Fix] `build_trade_features` — alpha_pnl 피처 추가 (features dict 직후)
+- [Quick Fix] `build_trade_features` — max_pnl 미전파 버그 수정 + Alpha 정규화
+- [Quick Fix] 버전 태그 업데이트 (v5.64 → v5.65)
+- [Quick Fix] meta 버전 문자열 동기화
+
+v5.65: ML Alpha 정규화 + JSONL 버그 수정 (2026-04-02)
+- [ML] compute_trade_quality_score — Alpha PnL 스코어링 (BTC beta 차감)
+- [ML] _build_webhook_extra — btc_change_pct 전파 + alpha_pnl 피처 추가
+- [ML] build_trade_features — alpha_pnl 피처 + btc_change_pct 지원
+- [BUG] build_trade_features quality_score — max_pnl 미전파 수정 (v5.63 이후)
+- [근거] Gemini/Codex 합의: raw PnL = beta+alpha 혼재 → 상승장 과적합 위험
+
+v5.64: Quick Fix 적용 (2026-04-01)
+- [Quick Fix] `compute_trade_quality_score` — max_pnl 경로 안정성 페널티
+- [Quick Fix] `_build_webhook_extra` — max_pnl 전달 + trade_valid 이진 라벨 추가
+- [Quick Fix] `build_trade_features` — max_pnl 파라미터 추가 및 전파
+- [Quick Fix] 버전 태그 업데이트 (v5.62 → v5.63)
+
+v5.63: ML 라벨 품질 개선 (2026-03-31)
+- [ML] compute_trade_quality_score — max_pnl 경로 안정성 페널티 (Codex/Gemini 합의)
+- [ML] _build_webhook_extra — trade_valid 이진 라벨 추가 (메타 라벨링용)
+- [ML] build_trade_features — max_pnl 전파 + JSONL 로깅 확장
+- [근거] MFE 대비 회수율 분리 → -15%→+3% vs 0%→+3% ML 구분 가능
 
 v5.62: Quick Fix 적용 (2026-03-31)
 - [Quick Fix] ML_SCORE_WEIGHTS — time_efficiency 가중치 하향 (Priority 1)
@@ -742,6 +791,13 @@ ML_SCORE_WEIGHTS    = {"pnl": 0.4, "time_efficiency": 0.1, "risk_adjusted": 0.3,
                     # regime_fit 상향 → 시장 맥락에 맞는 거래 학습 강화
 MIN_SIGNAL_CANDLES  = 120   # 450봉 미달 종목 폴백 (RSI14 + BB20 + 여유분)
 
+# v5.69: ML 분류 라벨 상수 (Codex/Gemini 합의 — 3-class 최적화)
+# 근거: F2(19/22=86.4% 손실), D1(6종목 -6%~-10% 밀집) → STUCK_LOSS 분리 필수
+# 22건 표본에서 5-class는 클래스당 ~4건 → 통계적 무의미. 3-class가 견고.
+PROFIT_WIN_THRESHOLD    = 2.0    # +2% 이상 수익 시 WIN (수수료 0.1% 차감 후 실질 이익)
+STUCK_LOSS_THRESHOLD    = -5.0   # -5% 이하 손실 — 구조적 진입 실패 후보
+STUCK_HOURS_THRESHOLD   = 168.0  # 168시간(7일) 이상 보유 — 'stuck' 판정 기준
+
 # 파일 경로
 _BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
 PORTFOLIO_FILE  = os.path.join(_BASE_DIR, "portfolio.json")
@@ -1033,30 +1089,76 @@ def record_order(log, ticker, direction):
 # ============================================
 # ML 피처 수집 (v5.52)
 # ============================================
-def compute_trade_quality_score(pnl_pct, holding_hours, volatility, regime):
-    """매매 품질 점수 — ML 학습 라벨. 범위 -1.0 ~ +1.0."""
+def compute_trade_quality_score(pnl_pct, holding_hours, volatility, regime, max_pnl=None, btc_change_pct=None):
+    """매매 품질 점수 — ML 학습 라벨. 범위 -1.0 ~ +1.0.
+
+    v5.65: btc_change_pct 파라미터 추가 — Alpha PnL 기반 스코어링.
+    PnL에서 시장 수익률(BTC 변화율)을 차감하여 진입 품질(alpha)만 평가.
+    btc_change_pct=None이면 기존 raw PnL 사용 (하위 호환).
+    근거: Gemini/Codex 합의 — raw PnL은 beta+alpha 혼재, 상승장 과적합 위험.
+    F5 수치: 매도 평균 PnL +3.9~4.3%, BTC +0.17% → alpha ≈ +3.7~4.1%.
+
+    v5.63: max_pnl 파라미터 추가 — 경로 안정성 반영.
+    보유 중 최고 PnL(high_pnl) 대비 최종 PnL 차이가 클수록 감점.
+    근거: Codex "PnL에 노이즈·체결품질 섞임" — 경로 변동성 분리.
+    drawdown 10%p당 0.15점 감점, 최대 -0.3 clamp (Gemini 제안 반영).
+    """
     try:
-        pnl_score = max(min(pnl_pct / 10.0, 1.0), -1.0)
+        # v5.65: alpha = PnL - BTC 변화율 → 진입 품질만 분리 평가
+        # risk_adjusted/time_efficiency는 raw PnL 유지 (절대 위험/효율 측정)
+        alpha_pnl = pnl_pct - btc_change_pct if isinstance(btc_change_pct, (int, float)) else pnl_pct
+        pnl_score = max(min(alpha_pnl / 10.0, 1.0), -1.0)
         time_eff = pnl_pct / max(holding_hours, 0.1)
         time_score = max(min(time_eff / 2.0, 1.0), -1.0)
         risk_adj = pnl_pct / max(volatility, 0.1)
         risk_score = max(min(risk_adj / 3.0, 1.0), -1.0)
         regime_bonus = {"BULL": 0.3, "MILD_BULL": 0.15, "SIDEWAYS": 0.0, "MILD_BEAR": -0.1, "BEAR": -0.2}
         regime_score = max(min(regime_bonus.get(regime, 0.0) + pnl_score * 0.5, 1.0), -1.0)
+        # v5.63: 경로 안정성 페널티 — 보유 중 최고 PnL 대비 회수율
+        # max_pnl=15%, pnl=3% → drawdown=12%p → penalty=0.18
+        # max_pnl <= 0 또는 None → penalty=0 (수익 미경험 거래는 페널티 없음)
+        path_penalty = 0.0
+        if max_pnl is not None and max_pnl > 0:
+            drawdown_from_peak = max(0.0, max_pnl - pnl_pct)
+            path_penalty = min(0.3, drawdown_from_peak * 0.015)
         w = ML_SCORE_WEIGHTS
-        total = w["pnl"]*pnl_score + w["time_efficiency"]*time_score + w["risk_adjusted"]*risk_score + w["regime_fit"]*regime_score
+        total = w["pnl"]*pnl_score + w["time_efficiency"]*time_score + w["risk_adjusted"]*risk_score + w["regime_fit"]*regime_score - path_penalty
         return round(max(min(total, 1.0), -1.0), 4)
     except Exception:
         return 0.0
 
 
+def _classify_trade(pnl_pct, holding_hours):
+    """매매 결과 3-class 분류 라벨 — 소표본(22건)에서 regression보다 견고.
+
+    Codex 합의: "분류가 현재 데이터 규모에서 더 견고".
+    Gemini 합의: "3개 클래스로 단순화하고 매직넘버를 상수로 관리".
+    리스크 매니저: "순수 함수, 사이드이펙트 0, 안전".
+
+    3-class (F2 근거: 19/22=86.4% 손실 → STUCK_LOSS 분리 필수):
+      WIN        — +2% 이상 수익 종료 (설계 의도대로 작동한 거래)
+      NEUTRAL    — -5%~+2% 범위 또는 단기 손실 (노이즈/보합/회복 가능)
+      STUCK_LOSS — -5% 이하 + 7일+ 보유 (구조적 진입 실패, 집중 학습 대상)
+    """
+    pnl = pnl_pct if isinstance(pnl_pct, (int, float)) else 0.0
+    hours = holding_hours if isinstance(holding_hours, (int, float)) else 0.0
+
+    if pnl >= PROFIT_WIN_THRESHOLD:
+        return "WIN"
+    if pnl <= STUCK_LOSS_THRESHOLD and hours >= STUCK_HOURS_THRESHOLD:
+        return "STUCK_LOSS"
+    return "NEUTRAL"
+
+
 def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
                          holding_hours, regime, entry_score, candles_df=None,
-                         entry_context=None):
+                         entry_context=None, max_pnl=None, btc_change_pct=None):
     """매매 피처 추출 + JSONL 로깅 — ML 학습 데이터 수집.
 
     entry_context: capture_entry_context()가 매수 시 캡처한 스냅샷.
     candles_df: 청산 시점 기술적 지표 추출용.
+    max_pnl: 보유 중 최고 PnL% (v5.63 — 경로 안정성 평가용).
+    btc_change_pct: BTC 변화율% (v5.65 — Alpha PnL 계산용, None이면 entry_context 폴백).
     """
     features = {
         "timestamp": utc_now().isoformat(),
@@ -1066,6 +1168,15 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         "holding_hours": round(holding_hours, 2) if holding_hours is not None else None,
         "regime": regime, "entry_score": entry_score,
     }
+    # v5.65: Alpha PnL 피처 (BTC beta 차감 — Gemini/Codex 합의)
+    _btc_chg = btc_change_pct if btc_change_pct is not None else (
+        entry_context.get("btc_change_pct") if entry_context else None
+    )
+    features["btc_change_pct"] = _btc_chg
+    features["alpha_pnl"] = round((pnl_pct or 0) - _btc_chg, 4) if isinstance(_btc_chg, (int, float)) else pnl_pct
+    # v5.69: 3-class 분류 라벨 (regression + classification 이중 라벨)
+    # F2: STUCK_LOSS 패턴 학습 → 진입 시점 피처와 결합하여 인과 분석
+    features["trade_class"] = _classify_trade(pnl_pct, holding_hours)
     # 진입 시점 피처 (capture_entry_context에서)
     if entry_context:
         features["entry_rsi"] = entry_context.get("entry_rsi")
@@ -1090,7 +1201,11 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
             atr = calc_atr(candles_df)
             vol = float(atr.iloc[-1]) / float(c.iloc[-1]) * 100 if float(c.iloc[-1]) > 0 else 1.0
             features["exit_volatility"] = round(vol, 2)
-            features["quality_score"] = compute_trade_quality_score(pnl_pct or 0, holding_hours or 0, vol, regime)
+            features["quality_score"] = compute_trade_quality_score(
+                pnl_pct or 0, holding_hours or 0, vol, regime,
+                max_pnl=max_pnl,
+                btc_change_pct=_btc_chg,
+            )
         except Exception:
             pass
     # JSONL 로깅
@@ -1147,6 +1262,9 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         "fear_greed": fear_greed_score,
         # [F] 시간
         "entry_hour_kst": now_kst.hour,
+        # v5.67: 야간 매수 피처 (F5 — 83% 야간 매수 편중, ML 인과분석용)
+        "entry_is_night": 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0,
+        "entry_day_of_week": now_kst.weekday(),
     }
     bb_upper = result.get("bb_upper", 0)
     bb_lower = result.get("bb_lower", 0)
@@ -1255,12 +1373,20 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "entry_hour_kst": ec.get("entry_hour_kst", now_kst.hour),
         "exit_hour_kst": now_kst.hour,
         "day_of_week": now_kst.weekday(),
-        # [G] 라벨 — quality_score
+        # v5.67: 야간 매수 피처 (F5 — ML이 야간/주간 진입 품질 차이 학습)
+        "entry_is_night": ec.get("entry_is_night", 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0),
+        "exit_is_night": 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0,
+        # [G] 라벨 — quality_score + trade_valid + alpha_pnl
         "quality_score": compute_trade_quality_score(
             pnl_pct, hold_hours,
             atr / price * 100 if price > 0 and atr > 0 else 1.0,
             exit_regime,
+            max_pnl=pos.get("high_pnl") if isinstance(pos, dict) else None,
+            btc_change_pct=btc_chg,  # v5.65: Alpha 정규화 — 시장 beta 차감
         ),
+        "trade_valid": 1 if pnl_pct > 0 else 0,  # v5.63: 메타 라벨링용 이진 타깃 (Codex 제안)
+        # v5.65: Alpha PnL — 시장 수익률(BTC) 차감한 진입 품질
+        "alpha_pnl": round(pnl_pct - btc_chg, 4) if isinstance(btc_chg, (int, float)) else pnl_pct,
         # [H] v5.54: 리스크 거리 피처 (ML 패턴 감지용)
         "sl_distance_pct": round(LOSS_CUT_PCT - abs(min(pnl_pct, 0)), 2),
         "position_age_days": round(hold_hours / 24, 2),
@@ -1281,6 +1407,8 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "rsi_delta": round(r.get("rsi", 50) - ec.get("entry_rsi", r.get("rsi", 50)), 1),
         "intra_trade_drawdown": round(max(0, pos.get("high_pnl", 0) - pnl_pct), 2) if isinstance(pos, dict) else 0,
         "regime_changed": 1 if ec.get("entry_regime", exit_regime) != exit_regime else 0,
+        # v5.69: 3-class 분류 라벨 (JSONL 스키마 동기화)
+        "trade_class": _classify_trade(pnl_pct, hold_hours),
     }
 
 
@@ -1447,7 +1575,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.62"
+        meta["version"] = "5.69"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
