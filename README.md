@@ -1,4 +1,4 @@
-# Coin Alert v5.71 — Upbit KRW 시스템 매매
+# Coin Alert v5.73 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -176,50 +176,154 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 
 ---
 
-## ML 매매 분석 (v5.52 ~ v5.70)
+## ML 매매 분석 (v5.52 ~ v5.73)
+
+### 목표
+매도 체결 시마다 **"왜 이 거래가 수익/손실이었는가?"**를 ML이 학습할 수 있는 피처를 축적한다.
+궁극적으로 **진입 시점에 "이 거래가 WIN/STUCK_LOSS가 될 확률"을 예측**하여 진입 품질을 높이는 것이 목표.
 
 ### 데이터 흐름
 
 ```
-매수 시: capture_entry_context() → portfolio에 entry_context 저장
-매도 시: _build_webhook_extra() → 오케스트레이터 API webhook → trade_analyses DB
-라벨링: _classify_trade() → 3-class (WIN/NEUTRAL/STUCK_LOSS) — v5.69
-품질: compute_trade_quality_score() → Alpha PnL 기반 + 경로 안정성 페널티 — v5.65
+[매수]  capture_entry_context() → 매수 시점 스냅샷을 portfolio에 저장
+           (RSI, ADX, BB위치, 변동성, 시장레짐, 공포탐욕 등)
+
+[매도]  _build_webhook_extra() → 청산 시점 피처 + 진입 피처 합산
+           → POST /api/v1/projects/coin-alert/trade-analysis
+           → 오케스트레이터 trade_analyses DB (43컬럼)
+        build_trade_features() → 동일 데이터 로컬 JSONL 백업
 ```
 
-### 축적 컬럼 (45+개)
+### 피처 상세 설명
 
-| 분류 | 컬럼 |
+#### [A] 거래 기본 (8개) — 무엇을 얼마에 사고팔았는가
+
+| 컬럼 | 설명 |
 |------|------|
-| **[A] 거래** (8) | ticker, side, price, volume, krw_amount, reason, entry_price, pnl_pct |
-| **[B] 진입지표** (7) | entry_rsi, entry_adx, entry_bb_position, entry_atr_pct, entry_volume_ratio, entry_price_percentile, entry_score |
-| **[C] 청산지표** (3) | exit_rsi, exit_adx, exit_atr_pct |
-| **[D] 시장** (5) | entry_regime, exit_regime, btc_change_pct, fear_greed, market_rising |
-| **[E] 포지션** (5) | hold_hours, dca_count, tp_level, max_pnl_during_hold, sl_partial_done |
-| **[F] 시간** (5) | entry_hour_kst, exit_hour_kst, day_of_week, **entry_is_night**, **exit_is_night** (v5.67) |
-| **[G] 라벨** (6) | score, quality_score, **trade_valid**, **alpha_pnl**, **trade_class** (v5.69) |
-| **[H] 리스크** (4) | sl_distance_pct, position_age_days, intra_trade_drawdown, regime_changed |
-| **메타** (4) | id, project_id, trade_timestamp, created_at |
+| `ticker` | 종목 (예: KRW-BTC) |
+| `side` | SELL 또는 PARTIAL_SELL |
+| `price` | 매도 체결가 |
+| `volume` | 매도 수량 |
+| `krw_amount` | 매도 금액 (원화) |
+| `reason` | 매도 사유 — TP1/TP2/TP3/TRAILING/RSI_SELL/SIGNAL/CATASTROPHIC_STOP/BREAKEVEN_STOP/STUCK_CLEANUP 등 |
+| `entry_price` | 매수 평균단가 (DCA 시 가중평균) |
+| `pnl_pct` | 수익률% = (매도가/진입가 - 1) × 100 |
+
+#### [B] 진입 시점 기술지표 (7개) — 매수할 때 시장 상태가 어땠는가
+
+매수 시점의 `capture_entry_context()` 스냅샷. **ML이 "어떤 조건에서 진입하면 수익이 나는가"를 학습하는 핵심 입력.**
+
+| 컬럼 | 설명 | 좋은 진입 예시 |
+|------|------|--------------|
+| `entry_rsi` | 매수 시 RSI (0~100) | RSI ≤ 30 (과매도) |
+| `entry_adx` | 매수 시 ADX (추세 강도) | ADX < 25 (비추세 = 평균회귀 유리) |
+| `entry_bb_position` | BB 밴드 내 위치 (-1~+1, 0=중앙) | < -0.5 (하단 근접) |
+| `entry_atr_pct` | 매수 시 ATR% (변동성) | 낮을수록 안정 |
+| `entry_volume_ratio` | 24h 거래량 / 20일 평균 | > 1.5 (거래량 급증 = 관심 집중) |
+| `entry_price_percentile` | 450봉 중 현재가 백분위 (0=최저) | < 10 (역사적 저점 근접) |
+| `entry_score` | 앙상블 스코어 (3전략 합산) | 높을수록 강한 매수 신호 |
+
+#### [C] 청산 시점 기술지표 (3개) — 팔 때 시장 상태
+
+| 컬럼 | 설명 |
+|------|------|
+| `exit_rsi` | 매도 시 RSI — 높으면 과매수 구간에서 익절 |
+| `exit_adx` | 매도 시 ADX — 추세 강도 |
+| `exit_atr_pct` | 매도 시 ATR% — 변동성. quality_score 계산에 사용 |
+
+#### [D] 시장 컨텍스트 (5개) — 전체 시장이 어땠는가
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `entry_regime` | 매수 시 BTC 레짐 (BULL/MILD_BULL/SIDEWAYS/MILD_BEAR/BEAR) | 레짐별 승률 차이 학습 |
+| `exit_regime` | 매도 시 레짐 | 레짐 변화가 수익에 미치는 영향 |
+| `btc_change_pct` | BTC 24h 변화율% | 시장 전체 방향성 |
+| `fear_greed` | 공포탐욕지수 (0=극단공포, 100=극단탐욕) | 극단공포 매수 → 고승률 가설 검증 |
+| `market_rising` | 상승 종목 수 (242종목 중) | 시장 전반 분위기 |
+
+#### [E] 포지션 메타 (5개) — 어떻게 보유했는가
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `hold_hours` | 보유 시간 | 장기 보유 vs 단기 익절 패턴 |
+| `dca_count` | DCA 횟수 (0/1/2) | DCA 후 승률 변화 분석 |
+| `tp_level` | 익절 단계 (0=미익절, 1=TP1, 2=TP2) | 분할익절 효과 측정 |
+| `max_pnl_during_hold` | 보유 중 최고 PnL% (MFE) | 최고점 대비 얼마나 회수했는지 |
+| `sl_partial_done` | 분할손절 1단계 실행 여부 | 손절 이력이 최종 결과에 미치는 영향 |
+
+#### [F] 시간 (5개) — 언제 샀고 팔았는가
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `entry_hour_kst` | 매수 시각 (KST 0~23) | 시간대별 승률 차이 |
+| `exit_hour_kst` | 매도 시각 | - |
+| `day_of_week` | 요일 (0=월 ~ 6=일) | 주말/평일 패턴 |
+| `entry_is_night` | 야간 매수 여부 (23~06시 = 1) | v5.67: 83% 야간 매수 편중 발견 → 야간/주간 품질 차이 분석 |
+| `exit_is_night` | 야간 매도 여부 | - |
+
+#### [G] 라벨 (7개) — ML 학습 타깃 (이 거래가 좋았는가?)
+
+| 컬럼 | 범위 | 설명 |
+|------|------|------|
+| `quality_score` | -1.0 ~ +1.0 | **핵심 라벨.** Alpha PnL + 시간효율 + 위험조정 + 레짐적합도 - 경로페널티의 가중합 |
+| `alpha_pnl` | % | PnL - BTC변화율. 시장 상승분(beta)을 빼고 **순수 진입 품질(alpha)만** 측정 |
+| `trade_class` | WIN/NEUTRAL/STUCK_LOSS | 3-class 분류 라벨. 소표본(~60건)에서 regression보다 견고 |
+| `trade_valid` | 0/1 | PnL > 0이면 1. 메타 라벨링용 이진 타깃 |
+| `mfe_capture_ratio` | -2.0 ~ 1.0 | MFE 포착률 = 최종PnL / 보유중최고PnL. **1.0=최고점 청산, 0.0=수익 전량 반납** |
+| `score` | 0~100 | 거래 종합 점수 (오케스트레이터 자체 계산) |
+| `rsi_delta` | | 매도RSI - 매수RSI. 양수면 과매수 방향으로 진행 |
+
+#### [H] 리스크 파생 피처 (4개) — 거래 중 위험 신호
+
+| 컬럼 | 설명 |
+|------|------|
+| `sl_distance_pct` | 손절선까지 남은 거리% — 작을수록 위험했던 거래 |
+| `position_age_days` | 보유 일수 (hold_hours / 24) |
+| `intra_trade_drawdown` | 보유 중 최고 PnL - 최종 PnL. **높으면 수익을 많이 반납** |
+| `regime_changed` | 매수~매도 사이 레짐 변화 여부 (1=변화) — 레짐 전환이 손실 원인인지 분석 |
 
 ### ML 분류 라벨 (v5.69 — 3-class)
 
-| 클래스 | 조건 | 의미 |
-|--------|------|------|
-| **WIN** | PnL ≥ +2% | 설계대로 수익 실현 |
-| **NEUTRAL** | -5% ~ +2% | 노이즈/보합/회복 가능 |
-| **STUCK_LOSS** | PnL ≤ -5% & 7일+ 보유 | 구조적 진입 실패 (집중 학습 대상) |
+22건 표본 분석에서 5-class는 클래스당 ~4건으로 통계적 무의미 → **3-class로 단순화** (Codex/Gemini 합의).
 
-### Alpha PnL (v5.65)
-- `alpha_pnl = PnL - BTC변화율` → 시장 beta 제거, 진입 품질(alpha)만 평가
-- 경로 안정성 페널티: 보유 중 최고 PnL 대비 회수율 감점 (drawdown 10%p당 -0.15점)
+| 클래스 | 조건 | 비율 | 의미 | ML 활용 |
+|--------|------|------|------|---------|
+| **WIN** | PnL ≥ +2% | ~60% | 설계대로 수익 실현 | 정상 패턴 학습 |
+| **NEUTRAL** | -5% ~ +2% | ~25% | 노이즈/보합/소폭 손실 | 경계 조건 학습 |
+| **STUCK_LOSS** | PnL ≤ -5% & 7일+ 보유 | ~15% | 구조적 진입 실패 | **집중 학습 대상** — 이 패턴을 사전 감지하는 것이 핵심 |
+
+### quality_score 계산 (v5.65~v5.72)
+
+```
+alpha_pnl    = PnL - BTC변화율       ← 시장 수익 제거, 순수 진입 품질
+pnl_score    = alpha_pnl / 10        ← [-1, +1] 정규화
+time_score   = PnL / log2(보유시간+1) ← v5.72: 비선형, 짧은 거래 과대평가 방지
+risk_score   = PnL / 변동성           ← 위험 대비 수익
+regime_score = 레짐 보너스 + pnl      ← BULL +0.3, BEAR -0.2
+path_penalty = (최고PnL - 최종PnL) × 0.015  ← 수익 반납 감점, 최대 -0.3
+
+quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
+```
+
+### 버전별 ML 피처 추가 이력
+
+| 버전 | 추가 피처 | 배경 |
+|------|-----------|------|
+| v5.52 | 기본 37컬럼 (A~F + quality_score) | ML 파이프라인 최초 구축 |
+| v5.63 | max_pnl 경로 안정성 페널티 | MFE 15%→최종 3%인 거래와 0%→3%인 거래 구분 |
+| v5.65 | alpha_pnl, btc_change_pct 지원 | raw PnL = beta+alpha 혼재 → 상승장 과적합 방지 |
+| v5.67 | entry_is_night, entry_day_of_week | 83% 야간 매수 편중 발견 → 시간대별 품질 분석 |
+| v5.69 | trade_class 3-class 분류 | 소표본에서 regression보다 견고한 classification |
+| v5.70 | trade_valid 이진 라벨 | 메타 라벨링용 |
+| v5.72 | mfe_capture_ratio, time_efficiency log2 | MFE 포착률로 진입품질 vs 운 분리, 짧은 거래 편향 제거 |
 
 ---
 
-## 주요 파라미터 (v5.71)
+## 주요 파라미터 (v5.73)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)
-MAX_CONCURRENT_POSITIONS   = 30           (최대 동시 보유 — v5.60)
+MAX_CONCURRENT_POSITIONS   = 25           (최대 동시 보유 — v5.72: 30→25 슬롯 포화 완화)
 MAX_POSITION_PCT           = 0.05         (건당 5%)
 MAX_PORTFOLIO_EXPOSURE     = 0.90         (최대 노출 90% — v5.62)
 

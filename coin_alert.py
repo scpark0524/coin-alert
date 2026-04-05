@@ -1,5 +1,12 @@
 """
-🪙 Coin Alert System v5.71 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.73 — Upbit KRW 자동매매
+
+v5.73: Quick Fix 적용 (2026-04-05)
+- [Quick Fix] MAX_CONCURRENT_POSITIONS 30→25 — 슬롯 포화 완화
+- [Quick Fix] time_efficiency 비선형 정규화 — ML 점수 편향 제거
+- [Quick Fix] webhook MFE 포착률 피처 추가 — ML 진입 품질 분리
+- [Quick Fix] JSONL MFE 포착률 피처 추가 — ML 학습 데이터 동기화
+- [Quick Fix] 버전 태그 업데이트 5.71→5.72
 
 v5.71: 손절 완화 — CATASTROPHIC 30% 복원 + BREAKEVEN_SL 비활성 (2026-04-04)
 - [수정] CATASTROPHIC_STOP_PCT 20→30% 복원 (KAT -20.5% 조기손절 방지)
@@ -606,13 +613,13 @@ MAX_PORTFOLIO_EXPOSURE  = 0.90   # v5.62: 85→90% (30종목 보유 한도 실�
                                  # 근거: 5%×70%(첫매수)=3.5%/종목, 30×3.5%=105% 이론상한
                                  # 90%에서 ~25종목 진입 가능, DCA 여력 10% 확보
                                  # 대원칙1 "수익 극대화" + 대원칙5 "하락장에서 포지션 구축" 균형
-MAX_CONCURRENT_POSITIONS = 30    # v5.59: 20→30 (매매 히스토리 축적 가속 — 테스트 건수 확보 우선)
-                                 # 근거: 5%×70%(첫매수)=3.5%/종목, 90% 노출 한도에서 ~25종목 진입
-                                 # SL 제거 전략(30%)이므로 연쇄 SL 리스크 없음
-                                 # 최악 시나리오: 30 × 12.5만 × CATASTROPHIC(-30%) = -112.5만(-22.5%)
-                                 # → 실제로는 DCA 2회 + 180일 보유로 반등 대기
-                                 # 목적: 다종목 매매 히스토리 축적 → ML 학습 데이터 확보
-                                 # 대원칙1 "수익 극대화" — 진입 기회 최대화, 거래 빈도 확대
+MAX_CONCURRENT_POSITIONS = 25    # v5.72: 30→25 (F2 합의 — 슬롯 포화 93.3% 완화, DCA 여력 확보)
+                                 # 근거: 5%×70%(첫매수)=3.5%/종목, 90% 한도에서 ~25종목 진입
+                                 # 변경 1(CATASTROPHIC 20%) 적용 시: 25×15만×20% = -75만(-15%)
+                                 # 현재 28종목 > 25 → 신규 매수 일시 차단, TP 익절로 자연 감소
+                                 # 목표: ~20/25=80% 포화도, 현금 30%+ 확보, DCA 여력 복원
+                                 # Gemini: 28종목 = BTC 급락 시 상관 0.9+ 동일 베타 묶음 리스크
+                                 # 대원칙1+2 균형 — 수익 기회 vs 동시 하락 방어
 
 # 켈리 참고용
 KELLY_FRACTION          = 0.25   # v2.0: 0.5→0.25 Quarter-Kelly
@@ -1112,8 +1119,10 @@ def compute_trade_quality_score(pnl_pct, holding_hours, volatility, regime, max_
         # risk_adjusted/time_efficiency는 raw PnL 유지 (절대 위험/효율 측정)
         alpha_pnl = pnl_pct - btc_change_pct if isinstance(btc_change_pct, (int, float)) else pnl_pct
         pnl_score = max(min(alpha_pnl / 10.0, 1.0), -1.0)
-        time_eff = pnl_pct / max(holding_hours, 0.1)
-        time_score = max(min(time_eff / 2.0, 1.0), -1.0)
+        # v5.72: 비선형 정규화 — log2 스케일링 (짧은 거래 과대평가 방지, Codex 합의)
+        # 기존 linear: 1h/24h = 24x 차이 → log2: 1.0/4.6 = 4.6x 차이 (합리적)
+        time_eff = pnl_pct / max(np.log2(max(holding_hours, 1) + 1), 0.5)
+        time_score = max(min(time_eff / 3.0, 1.0), -1.0)
         risk_adj = pnl_pct / max(volatility, 0.1)
         risk_score = max(min(risk_adj / 3.0, 1.0), -1.0)
         regime_bonus = {"BULL": 0.3, "MILD_BULL": 0.15, "SIDEWAYS": 0.0, "MILD_BEAR": -0.1, "BEAR": -0.2}
@@ -1181,6 +1190,11 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     # v5.69: 3-class 분류 라벨 (regression + classification 이중 라벨)
     # F2: STUCK_LOSS 패턴 학습 → 진입 시점 피처와 결합하여 인과 분석
     features["trade_class"] = _classify_trade(pnl_pct, holding_hours)
+    # v5.72: MFE 포착률 (ML — 보유 중 최고 수익 대비 청산 수익, 경로 품질 측정)
+    _mfe_high = max_pnl if max_pnl is not None and max_pnl > 0 else 0
+    features["mfe_capture_ratio"] = round(
+        max(-2.0, min(1.0, (pnl_pct or 0) / _mfe_high)), 4
+    ) if _mfe_high > 0 else (1.0 if (pnl_pct or 0) >= 0 else 0.0)
     # 진입 시점 피처 (capture_entry_context에서)
     if entry_context:
         features["entry_rsi"] = entry_context.get("entry_rsi")
@@ -1389,6 +1403,9 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "dca_count": pos.get("dca_count", 0) if isinstance(pos, dict) else 0,
         "tp_level": pos.get("tp_level", 0) if isinstance(pos, dict) else 0,
         "max_pnl_during_hold": pos.get("high_pnl", 0) if isinstance(pos, dict) else 0,
+        # v5.72: MFE 포착률 — 보유 중 최고 수익 대비 청산 수익 비율 (진입 품질 vs 운 분리)
+        # 1.0=최고점 청산, 0.0=수익 전량 반납, <0=수익→손실 전환
+        "mfe_capture_ratio": round(max(-2.0, min(1.0, pnl_pct / pos["high_pnl"])), 4) if isinstance(pos, dict) and pos.get("high_pnl", 0) > 0 else (1.0 if pnl_pct >= 0 else 0.0),
         "sl_partial_done": 1 if (isinstance(pos, dict) and pos.get("sl_partial_done")) else 0,
         # [F] 시간
         "entry_hour_kst": ec.get("entry_hour_kst", now_kst.hour),
@@ -1596,7 +1613,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.71"
+        meta["version"] = "5.72"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
