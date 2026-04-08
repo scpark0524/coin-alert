@@ -1,5 +1,20 @@
 """
-🪙 Coin Alert System v5.73 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.79 — Upbit KRW 자동매매
+
+v5.79: Quick Fix 적용 (2026-04-08)
+- [Quick Fix] TRAILING_CALLBACK_POST_TP2 상수 신설 (F7 ENSO 이익 반납 대응)
+- [Quick Fix] 트레일링 스탑 TP2 후 타이트 콜백 적용 (F7 완성 — 변경 2와 결합)
+- [Quick Fix] build_trade_features — JSONL 파생 피처 webhook 동기화 (ML 데이터 품질)
+
+v5.77: Quick Fix 적용 (2026-04-07)
+- [Quick Fix] ML stuck_position 피처 — webhook 확장 (F4 ML 데이터)
+- [Quick Fix] ML stuck_position 피처 — JSONL 동기화 (F4 ML 데이터)
+
+v5.75: Quick Fix 적용 (2026-04-06)
+- [Quick Fix] build_trade_features — entry_context 키 불일치 버그 수정 (2건)
+- [Quick Fix] build_trade_features — tp1_reached 이진 라벨 + regime_tp1_pct 추가
+- [Quick Fix] _build_webhook_extra — tp1_reached + regime_tp1_pct 동기화
+- [Quick Fix] capture_entry_context — entry_regime_tp1_pct 피처 추가
 
 v5.73: Quick Fix 적용 (2026-04-05)
 - [Quick Fix] MAX_CONCURRENT_POSITIONS 30→25 — 슬롯 포화 완화
@@ -780,6 +795,9 @@ TRAILING_ACTIVATE_PCT  = 5.0     # v5.16: 7→5% (TP1 3.0% 부분매도 후 +2.0
                                  # TP2(7%)와 2%p 간격 → 독립 작동, 레벨 충돌 없음
 TRAILING_CALLBACK_PCT  = 2.0     # v4.3: 1.5→2.0% (크립토 1h봉 평균 변동폭 1.5% 감안)
                                  # 근거: 1.5% 콜백은 정상 변동에도 트리거 → 2.0%로 노이즈 필터
+TRAILING_CALLBACK_POST_TP2 = 1.5 # v5.78: TP2 후 잔여 20%에 타이트 콜백 (F7 ENSO 이익 반납 방지)
+                                 # 근거: ENSO TP2(+9.5%)→SIGNAL(+3.7%), 5.8%p 이익 반납 사례
+                                 # 80% 수익 확보 완료 → 잔여 20% 보호 우선, 조기 청산 허용
 
 # 서킷브레이커
 CIRCUIT_BREAKER_DD = 0.15  # v3.0: 10%→15% 크립토 변동성 반영
@@ -1190,6 +1208,15 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     # v5.69: 3-class 분류 라벨 (regression + classification 이중 라벨)
     # F2: STUCK_LOSS 패턴 학습 → 진입 시점 피처와 결합하여 인과 분석
     features["trade_class"] = _classify_trade(pnl_pct, holding_hours)
+    # v5.76: stuck position 피처 — JSONL 스키마 동기화 (F4 — webhook과 일치)
+    features["is_stuck"] = 1 if (holding_hours is not None and holding_hours > STUCK_HOURS_THRESHOLD and (pnl_pct or 0) < 0) else 0
+    features["loss_band"] = 0 if (pnl_pct or 0) >= 0 else (1 if (pnl_pct or 0) >= -2 else (2 if (pnl_pct or 0) >= -5 else (3 if (pnl_pct or 0) >= -10 else 4)))
+    # v5.74: TP1 도달 이진 라벨 + 레짐 TP1 기준 (Gemini/Codex 합의 — 분류 라벨이 회귀보다 견고)
+    # max_pnl(보유 중 최고 PnL)이 레짐별 TP1 기준 이상이면 1, 아니면 0
+    # ML이 "TP1에 도달하는 거래" vs "못하는 거래"의 진입 패턴 차이를 학습
+    _regime_tp1 = get_regime_scoring(regime).get("tp1_pct", 3.0)
+    features["tp1_reached"] = 1 if (max_pnl is not None and max_pnl >= _regime_tp1) else 0
+    features["regime_tp1_pct"] = _regime_tp1
     # v5.72: MFE 포착률 (ML — 보유 중 최고 수익 대비 청산 수익, 경로 품질 측정)
     _mfe_high = max_pnl if max_pnl is not None and max_pnl > 0 else 0
     features["mfe_capture_ratio"] = round(
@@ -1201,8 +1228,8 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         features["entry_bb_position"] = entry_context.get("bb_position")
         features["entry_adx"] = entry_context.get("entry_adx")
         features["entry_confidence"] = entry_context.get("entry_confidence")
-        features["entry_volume_ratio"] = entry_context.get("volume_ratio")
-        features["entry_price_percentile"] = entry_context.get("price_percentile")
+        features["entry_volume_ratio"] = entry_context.get("entry_volume_ratio")  # v5.74: BUG FIX — "volume_ratio"→"entry_volume_ratio" (v5.52 이후 항상 None)
+        features["entry_price_percentile"] = entry_context.get("entry_price_percentile")  # v5.74: BUG FIX — "price_percentile"→"entry_price_percentile" (v5.50 최저가필터 ML 추적 복원)
         features["entry_btc_change"] = entry_context.get("btc_change_pct")
     # 청산 시점 피처
     if candles_df is not None and len(candles_df) >= 20:
@@ -1226,6 +1253,19 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
             )
         except Exception:
             pass
+    # v5.78: JSONL 파생 피처 — webhook 스키마 동기화 (6종 추가)
+    # 근거: webhook(_build_webhook_extra)에는 있으나 JSONL에 누락 → ML 학습 스키마 불일치
+    # rsi_delta: 진입→청산 RSI 변화 (반등 강도), intra_trade_drawdown: 보유 중 최대 낙폭
+    # regime_changed: 레짐 전환 여부, sl_distance_pct: 손절선까지 여유
+    # position_age_days: 보유 일수, pnl_per_day: 일당 수익률
+    features["rsi_delta"] = round(
+        (features.get("exit_rsi") or 50) - (features.get("entry_rsi") or 50), 1
+    )
+    features["intra_trade_drawdown"] = round(max(0, (max_pnl or 0) - (pnl_pct or 0)), 2)
+    features["regime_changed"] = 1 if (entry_context or {}).get("entry_regime", regime) != regime else 0
+    features["sl_distance_pct"] = round(LOSS_CUT_PCT - abs(min(pnl_pct or 0, 0)), 2)
+    features["position_age_days"] = round((holding_hours or 0) / 24, 2)
+    features["pnl_per_day"] = round((pnl_pct or 0) / max((holding_hours or 0) / 24, 0.04), 4)
     # JSONL 로깅
     try:
         with open(ML_FEATURE_LOG, "a") as f:
@@ -1276,6 +1316,7 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         "entry_momentum_score": round(result.get("momentum_pred_score", 0), 1),
         # [D] 시장 컨텍스트
         "entry_regime": regime_info.get("regime", ""),
+        "entry_regime_tp1_pct": get_regime_scoring(regime_info.get("regime", "")).get("tp1_pct", 3.0),  # v5.74: ML — 진입 시 TP1 목표 기록
         "btc_change_pct": 0,
         "fear_greed": fear_greed_score,
         # [F] 시간
@@ -1429,6 +1470,9 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "sl_distance_pct": round(LOSS_CUT_PCT - abs(min(pnl_pct, 0)), 2),
         "position_age_days": round(hold_hours / 24, 2),
         "pnl_per_day": round(pnl_pct / max(hold_hours / 24, 0.04), 4),
+        # [K] v5.76: stuck position 피처 (F4 — 6종목 체류 패턴 ML 학습, Codex/Gemini 합의)
+        "is_stuck": 1 if (hold_hours > STUCK_HOURS_THRESHOLD and pnl_pct < 0) else 0,
+        "loss_band": 0 if pnl_pct >= 0 else (1 if pnl_pct >= -2 else (2 if pnl_pct >= -5 else (3 if pnl_pct >= -10 else 4))),
         # [I] v5.57: ML 피처 확장 — 점수 분해 + 시장 미시구조 (Gemini Priority 1)
         "exit_trend_score": round(r.get("trend_score", 0), 1),
         "exit_mean_rev_score": round(r.get("mean_rev_score", 0), 1),
@@ -1447,6 +1491,9 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "regime_changed": 1 if ec.get("entry_regime", exit_regime) != exit_regime else 0,
         # v5.69: 3-class 분류 라벨 (JSONL 스키마 동기화)
         "trade_class": _classify_trade(pnl_pct, hold_hours),
+        # v5.74: TP1 도달 이진 라벨 + 레짐 TP1 기준 (JSONL 스키마 동기화)
+        "tp1_reached": 1 if (isinstance(pos, dict) and pos.get("high_pnl", 0) >= get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0)) else 0,
+        "entry_regime_tp1_pct": get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0),
     }
 
 
@@ -3211,10 +3258,12 @@ def main():
             if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
                 high_pnl = max(pos.get("high_pnl", 0), pnl_pct)
                 pos["high_pnl"] = high_pnl
-                if high_pnl >= TRAILING_ACTIVATE_PCT and (high_pnl - pnl_pct) >= TRAILING_CALLBACK_PCT:
+                # v5.78: TP2 후 잔여 20%에 타이트 콜백 (F7 ENSO +9.5%→+3.7% 이익 반납 방지)
+                _callback = TRAILING_CALLBACK_POST_TP2 if tp_level >= 2 else TRAILING_CALLBACK_PCT
+                if high_pnl >= TRAILING_ACTIVATE_PCT and (high_pnl - pnl_pct) >= _callback:
                     r["signal"] = "CLOSE"
                     r["close_reason"] = "TRAILING_STOP"
-                    print(f"   📈 {name} 트레일링 익절: 고점 {high_pnl:+.1f}% → 현재 {pnl_pct:+.1f}% (콜백 {high_pnl-pnl_pct:.1f}%)")
+                    print(f"   📈 {name} 트레일링 익절: 고점 {high_pnl:+.1f}% → 현재 {pnl_pct:+.1f}% (콜백 {high_pnl-pnl_pct:.1f}%, TP{tp_level})")
 
             # v5.40: 레짐별 RSI 과매수 익절 — 분할매도 대원칙 준수
             # TP1 미달(pnl < regime_tp1) 시 전량매도 금지, TP1 분할매도 기회 보장

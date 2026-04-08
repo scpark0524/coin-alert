@@ -1,4 +1,4 @@
-# Coin Alert v5.73 — Upbit KRW 시스템 매매
+# Coin Alert v5.79 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -270,6 +270,9 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 | `trade_class` | WIN/NEUTRAL/STUCK_LOSS | 3-class 분류 라벨. 소표본(~60건)에서 regression보다 견고 |
 | `trade_valid` | 0/1 | PnL > 0이면 1. 메타 라벨링용 이진 타깃 |
 | `mfe_capture_ratio` | -2.0 ~ 1.0 | MFE 포착률 = 최종PnL / 보유중최고PnL. **1.0=최고점 청산, 0.0=수익 전량 반납** |
+| `tp1_reached` | 0/1 | 보유 중 레짐별 TP1에 도달했는지 (v5.75). "TP1 도달하는 거래"의 진입 패턴 학습 |
+| `is_stuck` | 0/1 | 7일+ 보유 & 손실 상태 (v5.77). stuck 포지션 사전 감지용 |
+| `loss_band` | 0~4 | 손실 구간: 0=수익, 1=-2%, 2=-5%, 3=-10%, 4=-10%+ (v5.77) |
 | `score` | 0~100 | 거래 종합 점수 (오케스트레이터 자체 계산) |
 | `rsi_delta` | | 매도RSI - 매수RSI. 양수면 과매수 방향으로 진행 |
 
@@ -316,10 +319,13 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 | v5.69 | trade_class 3-class 분류 | 소표본에서 regression보다 견고한 classification |
 | v5.70 | trade_valid 이진 라벨 | 메타 라벨링용 |
 | v5.72 | mfe_capture_ratio, time_efficiency log2 | MFE 포착률로 진입품질 vs 운 분리, 짧은 거래 편향 제거 |
+| v5.75 | tp1_reached, regime_tp1_pct, entry_context 키 버그 수정 | TP1 도달 이진 분류 + 레짐 TP1 기준 기록 |
+| v5.77 | is_stuck, loss_band | stuck 포지션 사전 감지 + 손실 구간 세분화 |
+| v5.79 | TRAILING_CALLBACK_POST_TP2, JSONL 파생 피처 동기화 | TP2 후 타이트 트레일링 + JSONL-webhook 스키마 일치 |
 
 ---
 
-## 주요 파라미터 (v5.73)
+## 주요 파라미터 (v5.79)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)
@@ -340,6 +346,7 @@ PARTIAL_SL_ENABLED         = False        (분할 손절 비활성)
 LOSS_CUT_PCT               = 30%          (상폐 방어만)
 CATASTROPHIC_STOP_PCT      = 30%          (상폐 방어만 — v5.71: 20→30% 복원)
 TP1_BREAKEVEN_SL           = False        (v5.71: TP1 후 잔여분 버티기)
+TRAILING_CALLBACK_POST_TP2 = 1.5%         (v5.79: TP2 후 타이트 콜백 — ENSO 이익반납 방지)
 MAX_HOLD_DAYS              = 180          (사실상 무제한)
 
 PROFIT_TARGET_1ST          = 레짐별       (TP1: BEAR 2% ~ BULL 4%)
