@@ -1,4 +1,4 @@
-# Coin Alert v5.79 — Upbit KRW 시스템 매매
+# Coin Alert v5.80 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -325,7 +325,7 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 
 ---
 
-## 주요 파라미터 (v5.79)
+## 주요 파라미터 (v5.80)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)

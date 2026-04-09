@@ -1,5 +1,10 @@
 """
-🪙 Coin Alert System v5.79 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.80 — Upbit KRW 자동매매
+
+v5.80: Quick Fix 적용 (2026-04-09)
+- [Quick Fix] SIGNAL 매도 TP 레벨별 최소 PnL — TP2 후 잔여 20% 상방 포착 (F5)
+- [Quick Fix] webhook TP2 ML 피처 3종 추가 (F6)
+- [Quick Fix] JSONL TP2 ML 피처 3종 추가 — webhook 스키마 동기화 (F6)
 
 v5.79: Quick Fix 적용 (2026-04-08)
 - [Quick Fix] TRAILING_CALLBACK_POST_TP2 상수 신설 (F7 ENSO 이익 반납 대응)
@@ -1217,6 +1222,10 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     _regime_tp1 = get_regime_scoring(regime).get("tp1_pct", 3.0)
     features["tp1_reached"] = 1 if (max_pnl is not None and max_pnl >= _regime_tp1) else 0
     features["regime_tp1_pct"] = _regime_tp1
+    # v5.80: ML TP2 도달/거리 피처 — webhook 스키마 동기화 (F6)
+    features["tp2_reached"] = 1 if (max_pnl is not None and max_pnl >= PROFIT_TARGET_2ND) else 0
+    features["distance_to_tp2_pct"] = round(PROFIT_TARGET_2ND - (pnl_pct or 0), 2)
+    features["mfe_to_tp1_ratio"] = round((max_pnl or 0) / max(_regime_tp1, 0.1), 2)
     # v5.72: MFE 포착률 (ML — 보유 중 최고 수익 대비 청산 수익, 경로 품질 측정)
     _mfe_high = max_pnl if max_pnl is not None and max_pnl > 0 else 0
     features["mfe_capture_ratio"] = round(
@@ -1494,6 +1503,10 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         # v5.74: TP1 도달 이진 라벨 + 레짐 TP1 기준 (JSONL 스키마 동기화)
         "tp1_reached": 1 if (isinstance(pos, dict) and pos.get("high_pnl", 0) >= get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0)) else 0,
         "entry_regime_tp1_pct": get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0),
+        # v5.80: ML TP2 도달/거리 피처 (F6 — TP2 미도달 인과분석)
+        "tp2_reached": 1 if (isinstance(pos, dict) and pos.get("high_pnl", 0) >= PROFIT_TARGET_2ND) else 0,
+        "distance_to_tp2_pct": round(PROFIT_TARGET_2ND - pnl_pct, 2),
+        "mfe_to_tp1_ratio": round((pos.get("high_pnl", 0) if isinstance(pos, dict) else 0) / max(get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0), 0.1), 2),
     }
 
 
@@ -3333,10 +3346,13 @@ def main():
                         elif sig_pnl < 0:
                             r["signal"] = "HOLD"
                             print(f"   ⏳ {name} 신호 매도 유예 (손실 {sig_pnl:+.1f}% — SL(-{LOSS_CUT_PCT}%)까지 대기)")
-                        # v5.20: 이익 구간에서도 +1% 미만이면 매도 차단 (수수료 Churn 방지)
-                        elif sig_pnl < MIN_SIGNAL_EXIT_PNL:
-                            r["signal"] = "HOLD"
-                            print(f"   ⏳ {name} 신호 매도 유예 (PnL {sig_pnl:+.1f}% < +{MIN_SIGNAL_EXIT_PNL}%)")
+                        # v5.80: TP 레벨별 신호매도 최소 PnL (F5 — TP2 후 잔여 20% 상방 포착)
+                        else:
+                            _tp_lvl = portfolio[ticker].get("tp_level", 0)
+                            _min_sig_pnl = PROFIT_TARGET_2ND if _tp_lvl >= 2 else MIN_SIGNAL_EXIT_PNL
+                            if sig_pnl < _min_sig_pnl:
+                                r["signal"] = "HOLD"
+                                print(f"   ⏳ {name} 신호 매도 유예 (PnL {sig_pnl:+.1f}% < +{_min_sig_pnl}%, TP{_tp_lvl})")
                     except (ValueError, TypeError):
                         pass
 
