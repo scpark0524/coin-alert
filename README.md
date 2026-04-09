@@ -125,6 +125,7 @@ DCA 최대: 5% × 3회 = 15% (한 종목 최대 노출)
 
 #### 5. 신호매도 (Churn 방지 게이트)
 - 보유 ≥ 8h + PnL ≥ 0% + PnL ≥ 3%
+- **v5.80**: TP2 이후(잔여 20%)에서는 PnL ≥ 8%(=TP2) 이상에서만 신호매도 허용 — 상방 포착 개선
 
 #### 6. 장기 미회복 정리 (STUCK_CLEANUP)
 | 조건 (AND) | 값 |
@@ -271,6 +272,9 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 | `trade_valid` | 0/1 | PnL > 0이면 1. 메타 라벨링용 이진 타깃 |
 | `mfe_capture_ratio` | -2.0 ~ 1.0 | MFE 포착률 = 최종PnL / 보유중최고PnL. **1.0=최고점 청산, 0.0=수익 전량 반납** |
 | `tp1_reached` | 0/1 | 보유 중 레짐별 TP1에 도달했는지 (v5.75). "TP1 도달하는 거래"의 진입 패턴 학습 |
+| `tp2_reached` | 0/1 | 보유 중 TP2(8%)에 도달했는지 (v5.80). TP2 미도달 인과분석 |
+| `distance_to_tp2_pct` | % | TP2까지 남은 거리 = 8% - PnL (v5.80) |
+| `mfe_to_tp1_ratio` | float | MFE / 레짐TP1. 1.0이면 TP1 정확히 도달, >1이면 초과 (v5.80) |
 | `is_stuck` | 0/1 | 7일+ 보유 & 손실 상태 (v5.77). stuck 포지션 사전 감지용 |
 | `loss_band` | 0~4 | 손실 구간: 0=수익, 1=-2%, 2=-5%, 3=-10%, 4=-10%+ (v5.77) |
 | `score` | 0~100 | 거래 종합 점수 (오케스트레이터 자체 계산) |
@@ -322,6 +326,7 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 | v5.75 | tp1_reached, regime_tp1_pct, entry_context 키 버그 수정 | TP1 도달 이진 분류 + 레짐 TP1 기준 기록 |
 | v5.77 | is_stuck, loss_band | stuck 포지션 사전 감지 + 손실 구간 세분화 |
 | v5.79 | TRAILING_CALLBACK_POST_TP2, JSONL 파생 피처 동기화 | TP2 후 타이트 트레일링 + JSONL-webhook 스키마 일치 |
+| v5.80 | tp2_reached, distance_to_tp2_pct, mfe_to_tp1_ratio + SIGNAL TP가드 | TP2 ML 피처 3종 + TP2 후 신호매도 최소 PnL 상향 |
 
 ---
 
