@@ -1354,6 +1354,10 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         features["portfolio_dca_exhausted_count"] = entry_context.get("portfolio_dca_exhausted_count")
         features["portfolio_tp1_done_ratio"] = entry_context.get("portfolio_tp1_done_ratio")
         features["portfolio_avg_hold_days"] = entry_context.get("portfolio_avg_hold_days")
+        # v6.00: ML entry score — JSONL accumulation for model feedback loop
+        features["ml_entry_score"] = entry_context.get("ml_entry_score")
+        features["ml_entry_label"] = entry_context.get("ml_entry_label")
+        features["ml_regime_group"] = entry_context.get("ml_regime_group")
     # 청산 시점 피처
     if candles_df is not None and len(candles_df) >= 20:
         try:
@@ -3742,29 +3746,48 @@ def main():
                             if buy_krw < 5000:
                                 print(f"   🚨 {name} 매수 차단 (리스크 Level {risk_level}: {risk_label})")
                                 continue
-                            # v5.49: ML 모델 예측 (로깅만, 차단 안 함)
+                            # v6.00: Entry Quality ML — regime-split model (logging only, no blocking)
+                            _ml_result = None
                             try:
-                                import math as _math
-                                from trade_model import predict as _ml_predict
-                                _hour = utc_now().hour
-                                _prob = _ml_predict({
+                                from train_entry_model import predict_entry as _ml_predict_entry
+                                _pre_ec = {
                                     "entry_rsi": r.get("rsi", 50),
-                                    "exit_rsi": r.get("rsi", 50),
+                                    "entry_adx": r.get("adx", 0),
                                     "entry_score": r.get("ensemble_score", 0),
-                                    "hold_hours": 0,
-                                    "abs_pnl_pct": 0,
-                                    "btc_change_pct": 0,
-                                    "hour_sin": _math.sin(2 * _math.pi * _hour / 24),
-                                    "hour_cos": _math.cos(2 * _math.pi * _hour / 24),
-                                })
-                                if _prob is not None:
-                                    print(f"   🧠 {name} ML 예측점수: {_prob:+.2f} ({'양호' if _prob > 0 else '주의'})")
-                            except Exception:
-                                pass
+                                    "entry_confidence": r.get("confidence", 0),
+                                    "entry_volume_ratio": r.get("volume_ratio", 1.0),
+                                    "entry_price_percentile": r.get("full_percentile", 50),
+                                    "entry_atr_pct": round(r.get("atr", 0) / r["price"] * 100, 2) if r.get("price", 0) > 0 else 0,
+                                    "entry_btc_change": _wh_btc_chg,
+                                    "entry_hour_kst": utc_now().astimezone(KST).hour,
+                                    "entry_day_of_week": utc_now().astimezone(KST).weekday(),
+                                    "entry_is_night": 1 if (utc_now().astimezone(KST).hour >= 23 or utc_now().astimezone(KST).hour < 6) else 0,
+                                    "entry_mean_rev_score": r.get("mean_rev_score", 0),
+                                    "entry_momentum_score": r.get("momentum_pred_score", 0),
+                                    "entry_trend_score": r.get("trend_score", 0),
+                                    "entry_fear_greed": _wh_fg,
+                                    "entry_regime": regime_info.get("regime", "SIDEWAYS"),
+                                    "bb_position": 0.5,
+                                    "dca_count": 0,
+                                }
+                                _bb_u, _bb_l = r.get("bb_upper", 0), r.get("bb_lower", 0)
+                                if _bb_u > _bb_l:
+                                    _pre_ec["bb_position"] = round((r["price"] - _bb_l) / (_bb_u - _bb_l), 3)
+                                _pre_ec["entry_bb_position"] = _pre_ec["bb_position"]
+                                _ml_result = _ml_predict_entry(_pre_ec)
+                                print(f"   🧠 {name} ML entry: {_ml_result['score']:.2f} ({_ml_result['recommendation']}, {_ml_result['regime_group']})")
+                            except Exception as _ml_err:
+                                print(f"   ⚠️ {name} ML predict skip: {_ml_err}")
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
                                 _ec = capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg)
+                                # v6.00: ML entry score logging
+                                if _ml_result:
+                                    _ec["ml_entry_score"] = _ml_result["score"]
+                                    _ec["ml_entry_label"] = _ml_result["label"]
+                                    _ec["ml_entry_recommendation"] = _ml_result["recommendation"]
+                                    _ec["ml_regime_group"] = _ml_result["regime_group"]
                                 record_trade(ticker, "BUY", r["price"], buy_krw / r["price"], buy_krw, "INITIAL",
                                             entry_context=_ec)
                                 pending_exposure += buy_krw / total_capital  # v5.62: 실제 매수금 기준
