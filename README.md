@@ -1,4 +1,4 @@
-# Coin Alert v5.80 — Upbit KRW 시스템 매매
+# Coin Alert v5.100 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -327,10 +327,20 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 | v5.77 | is_stuck, loss_band | stuck 포지션 사전 감지 + 손실 구간 세분화 |
 | v5.79 | TRAILING_CALLBACK_POST_TP2, JSONL 파생 피처 동기화 | TP2 후 타이트 트레일링 + JSONL-webhook 스키마 일치 |
 | v5.80 | tp2_reached, distance_to_tp2_pct, mfe_to_tp1_ratio + SIGNAL TP가드 | TP2 ML 피처 3종 + TP2 후 신호매도 최소 PnL 상향 |
+| v5.84 | MAE (low_pnl) | 보유 중 최저 PnL 추적 — MFE의 반대 개념 |
+| v5.86 | dca_exhausted | DCA 고갈 패턴 학습 |
+| v5.89 | catastrophic_distance_pct, distance_to_tp1_pct | CATASTROPHIC/TP1 까지 거리 학습 |
+| v5.91 | portfolio_slot_ratio, portfolio_dca_exhausted_count, portfolio_tp1_done_ratio, portfolio_avg_hold_days | 청산 시점 포트폴리오 상태 4종 (F2+F4) |
+| v5.92 | (매도 로직 수정) | 먼지 포지션(< ₩5,000) 매도 반복 실패 방지 |
+| v5.93 | stuck_age_days | stuck 이진→연속 에이징 (7일vs30일 ML 구분) |
+| v5.96 | SIGNAL 매도 레짐 적응형 | TP1 후 신호매도 임계 계층화 (F2 상방 포착) |
+| v5.97 | stuck_penalty | 7일+ 체류 기회비용 감점 (quality_score) |
+| v5.99 | is_weekend, exit_day_of_week, exit_hour_kst + CATASTROPHIC 20% | 주말/시간 피처 + 계층 방어 복원 + STUCK_CLEANUP 60일 |
+| v5.100 | (메타 정리) | 독스트링 + 메타 버전 태그 동기화 |
 
 ---
 
-## 주요 파라미터 (v5.80)
+## 주요 파라미터 (v5.100)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)
@@ -349,7 +359,7 @@ STUCK_HOURS_THRESHOLD      = 168h         (7일 이상 보유 → stuck)
 
 PARTIAL_SL_ENABLED         = False        (분할 손절 비활성)
 LOSS_CUT_PCT               = 30%          (상폐 방어만)
-CATASTROPHIC_STOP_PCT      = 30%          (상폐 방어만 — v5.71: 20→30% 복원)
+CATASTROPHIC_STOP_PCT      = 20%          (계층 방어 복원 — v5.99: 30→20%)
 TP1_BREAKEVEN_SL           = False        (v5.71: TP1 후 잔여분 버티기)
 TRAILING_CALLBACK_POST_TP2 = 1.5%         (v5.79: TP2 후 타이트 콜백 — ENSO 이익반납 방지)
 MAX_HOLD_DAYS              = 180          (사실상 무제한)

@@ -1,5 +1,74 @@
 """
-🪙 Coin Alert System v5.80 — Upbit KRW 자동매매
+🪙 Coin Alert System v5.100 — Upbit KRW 자동매매
+
+v5.100: Quick Fix 적용 (2026-04-19)
+- [Quick Fix] 메타 버전 태그 5.97→5.99 (버그 수정)
+- [Quick Fix] ML is_weekend 피처 — _build_webhook_extra (ML Priority 1)
+- [Quick Fix] ML is_weekend + exit 시간 피처 — build_trade_features JSONL 동기화 (ML Priority 1)
+- [Quick Fix] 독스트링 v5.99 버전 업데이트 (버그 수정)
+
+v5.99: F1/F2 구조 개선 + ML 주말 피처 (2026-04-19)
+- [CRITICAL] CATASTROPHIC_STOP_PCT 30→20% — 계층 방어 복원 (F1 전원합의)
+- [매매] STUCK_CLEANUP_DAYS 90→60일 — 슬롯 포화 25/25 완화 (F2)
+- [ML] is_weekend 피처 — webhook + JSONL 동기화 (주말 유동성 패턴 학습)
+- [ML] exit_day_of_week/exit_hour_kst — JSONL 스키마 동기화
+- [FIX] 메타 버전 태그 5.97→5.99 동기화
+- [FIX] 모듈 독스트링 버전 업데이트
+
+v5.98: Quick Fix 적용 (2026-04-18)
+- [Quick Fix] 체류 페널티 상수 신설
+- [Quick Fix] compute_trade_quality_score — 체류 페널티 적용
+- [Quick Fix] build_trade_features — stuck_penalty JSONL 동기화
+- [Quick Fix] _build_webhook_extra — stuck_penalty webhook 동기화
+- [Quick Fix] 메타 버전 태그 동기화 (Bug Fix)
+- [Quick Fix] 모듈 독스트링 버전 업데이트
+
+v5.97: ML 체류 페널티 + 피처 확장 (2026-04-18)
+- [ML] compute_trade_quality_score — 7일+ 체류 기회비용 감점 (F5: SIGN 23일 -17.4%)
+- [ML] stuck_penalty 피처 — webhook + JSONL 동기화 (F5 ML 데이터)
+- [FIX] 메타 버전 태그 동기화 (5.92→5.97)
+
+v5.96: Quick Fix 적용 (2026-04-17)
+- [Quick Fix] TP1 완료 후 SIGNAL 매도 임계 레짐 적응형 계층화 (F2 상방 포착 개선)
+
+v5.94: Quick Fix 적용 (2026-04-16)
+- [Quick Fix] ML stuck_age_days webhook 피처 추가
+- [Quick Fix] ML stuck_age_days JSONL 피처 동기화
+
+v5.92: 먼지 포지션 매도 실패 수정 (2026-04-16)
+- [BUG] execute_sell() — Upbit 최소주문금액(5,000원) 체크 추가, 먼지 포지션 매도 반복 실패 방지
+- [BUG] 전량매도(CLOSE/STUCK_CLEANUP) — 먼지 포지션은 매도 생략 후 포트폴리오에서 자동 제거
+- [BUG] 분할매도(TP1/TP2/SL1/RSI_SELL) — 먼지 금액이면 분할매도 스킵 (잔여 포지션 유지)
+
+v5.91: Quick Fix 적용 (2026-04-15)
+- [Quick Fix] `_calc_portfolio_ml_features` 헬퍼 신설 + `_build_webhook_extra` 시그니처 확장
+- [Quick Fix] `_build_webhook_extra` 반환 dict — 포트폴리오 피처 병합
+- [Quick Fix] `_send_trade_analysis_webhook` — JSONL 포트폴리오 피처 전파
+- [Quick Fix] `build_trade_features` — JSONL 포트폴리오 피처 추출
+- [Quick Fix] main() 호출부 — `portfolio` 인자 전달 (TP1 대표 예시)
+
+v5.89: Quick Fix 적용 (2026-04-13)
+- [Quick Fix] ML 거리 피처 추가 — webhook + JSONL 동기화 (ML Priority 1)
+
+v5.87: 고아 포지션 오판 방지 + 파라미터 복원 (2026-04-13)
+- [CRITICAL] 포트폴리오 보유 종목 TICKERS 병합 — API 타임아웃 시 폴백으로 인한 고아 오판 방지
+- [복원] CATASTROPHIC_STOP_PCT 30% 유지 확인 — 미승인 변경(20%) 독스트링만 기재됐던 것 정리
+- [복원] MAX_CONCURRENT_POSITIONS 25개 유지 확인 — 미승인 변경(22/20) 독스트링만 기재됐던 것 정리
+- 참고: v5.81~v5.86 독스트링에 CATASTROPHIC 20%, MAX_CONCURRENT 22/20 변경 기록이 있었으나
+  실제 상수값은 변경되지 않았음 (데일리루틴 AI가 독스트링만 수정). 혼동 방지를 위해 삭제
+
+v5.86: ML dca_exhausted 피처 (2026-04-12)
+- [ML] dca_exhausted 피처 추가 — webhook + JSONL 동기화 (DCA 고갈 패턴 학습)
+- [FIX] 메타 버전 태그 동기화
+
+v5.84: MAE 피처 (2026-04-11)
+- [ML] low_pnl 갱신 — main() 트레일링 스탑 섹션 (MAE 전제조건)
+- [ML] low_pnl 보존 — sync_portfolio_with_upbit()
+- [ML] MAE 피처 — _build_webhook_extra() + _send_trade_analysis_webhook() + build_trade_features()
+
+v5.82: JSONL 스키마 확장 (2026-04-10)
+- [ML] JSONL exit-time 포트폴리오 메트릭 병합 (dca_count/tp_level/market_rising)
+- [ML] _send_trade_analysis_webhook dict 복사 안전성 개선
 
 v5.80: Quick Fix 적용 (2026-04-09)
 - [Quick Fix] SIGNAL 매도 TP 레벨별 최소 PnL — TP2 후 잔여 20% 상방 포착 (F5)
@@ -523,6 +592,21 @@ def fetch_krw_tickers():
     return TICKERS_FALLBACK
 
 TICKERS = fetch_krw_tickers()
+# v5.87: 포트폴리오 보유 종목을 TICKERS에 병합 — 고아 포지션 오판 방지
+# 근거: API 타임아웃 시 폴백 TICKERS에 보유 종목 미포함 → 정상 종목 강제 청산 사고 (2026-04-12)
+try:
+    _portfolio_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio.json")
+    if os.path.exists(_portfolio_path):
+        import json as _json_init
+        with open(_portfolio_path, "r") as _f:
+            _port_keys = _json_init.load(_f).keys()
+        _held = [t for t in _port_keys if t not in ("_meta", "_sell_memory") and t.startswith("KRW-")]
+        _missing = [t for t in _held if t not in TICKERS]
+        if _missing:
+            TICKERS = TICKERS + _missing
+            print(f"   🔒 포트폴리오 보유 종목 TICKERS 병합: {', '.join(t.replace('KRW-','') for t in _missing)}")
+except Exception as _e:
+    print(f"   ⚠️ 포트폴리오 TICKERS 병합 실패 (무시): {_e}")
 INITIAL_CAPITAL = int(os.environ.get("INITIAL_CAPITAL", 5_000_000))  # KRW 500만원 기본
 
 # 캔들 설정
@@ -831,6 +915,8 @@ MIN_SIGNAL_CANDLES  = 120   # 450봉 미달 종목 폴백 (RSI14 + BB20 + 여유
 PROFIT_WIN_THRESHOLD    = 2.0    # +2% 이상 수익 시 WIN (수수료 0.1% 차감 후 실질 이익)
 STUCK_LOSS_THRESHOLD    = -5.0   # -5% 이하 손실 — 구조적 진입 실패 후보
 STUCK_HOURS_THRESHOLD   = 168.0  # 168시간(7일) 이상 보유 — 'stuck' 판정 기준
+STUCK_PENALTY_PER_DAY   = 0.01   # v5.97: 7일 초과 일당 quality_score 감점 (F5: 자본 기회비용)
+MAX_STUCK_PENALTY       = 0.2    # v5.97: 체류 페널티 상한 (20일 초과에서 포화)
 
 # 파일 경로
 _BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
@@ -1157,8 +1243,14 @@ def compute_trade_quality_score(pnl_pct, holding_hours, volatility, regime, max_
         if max_pnl is not None and max_pnl > 0:
             drawdown_from_peak = max(0.0, max_pnl - pnl_pct)
             path_penalty = min(0.3, drawdown_from_peak * 0.015)
+        # v5.97: 체류 페널티 — 7일+ 보유 시 기회비용 반영 (F5: SIGN 23일 -17.4%)
+        # 수리: 23일 보유 → excess=(23*24-168)/24=16일 → penalty=min(0.2,0.16)=0.16
+        stuck_penalty = 0.0
+        if holding_hours is not None and holding_hours > STUCK_HOURS_THRESHOLD:
+            excess_days = (holding_hours - STUCK_HOURS_THRESHOLD) / 24
+            stuck_penalty = min(MAX_STUCK_PENALTY, excess_days * STUCK_PENALTY_PER_DAY)
         w = ML_SCORE_WEIGHTS
-        total = w["pnl"]*pnl_score + w["time_efficiency"]*time_score + w["risk_adjusted"]*risk_score + w["regime_fit"]*regime_score - path_penalty
+        total = w["pnl"]*pnl_score + w["time_efficiency"]*time_score + w["risk_adjusted"]*risk_score + w["regime_fit"]*regime_score - path_penalty - stuck_penalty
         return round(max(min(total, 1.0), -1.0), 4)
     except Exception:
         return 0.0
@@ -1215,6 +1307,8 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     features["trade_class"] = _classify_trade(pnl_pct, holding_hours)
     # v5.76: stuck position 피처 — JSONL 스키마 동기화 (F4 — webhook과 일치)
     features["is_stuck"] = 1 if (holding_hours is not None and holding_hours > STUCK_HOURS_THRESHOLD and (pnl_pct or 0) < 0) else 0
+    # v5.93: stuck_age_days JSONL 동기화 — webhook 스키마 일치 (F3/F4)
+    features["stuck_age_days"] = round(max(0, (holding_hours or 0) - STUCK_HOURS_THRESHOLD) / 24, 2) if (holding_hours is not None and holding_hours > STUCK_HOURS_THRESHOLD and (pnl_pct or 0) < 0) else 0.0
     features["loss_band"] = 0 if (pnl_pct or 0) >= 0 else (1 if (pnl_pct or 0) >= -2 else (2 if (pnl_pct or 0) >= -5 else (3 if (pnl_pct or 0) >= -10 else 4)))
     # v5.74: TP1 도달 이진 라벨 + 레짐 TP1 기준 (Gemini/Codex 합의 — 분류 라벨이 회귀보다 견고)
     # max_pnl(보유 중 최고 PnL)이 레짐별 TP1 기준 이상이면 1, 아니면 0
@@ -1231,6 +1325,15 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     features["mfe_capture_ratio"] = round(
         max(-2.0, min(1.0, (pnl_pct or 0) / _mfe_high)), 4
     ) if _mfe_high > 0 else (1.0 if (pnl_pct or 0) >= 0 else 0.0)
+    # v5.83: MAE — 보유 중 최저 PnL + 회복 퍼센트포인트 (V반등 패턴 학습)
+    _low_pnl = (entry_context or {}).get("min_pnl_during_hold", 0)
+    features["min_pnl_during_hold"] = _low_pnl
+    features["mae_recovery_pp"] = round(max(-50.0, min(50.0, (pnl_pct or 0) - _low_pnl)), 2)
+    # v5.97: 체류 페널티 피처 — ML이 quality_score 감점 원인 분리 학습 (F5)
+    _stuck_pen = 0.0
+    if holding_hours is not None and holding_hours > STUCK_HOURS_THRESHOLD:
+        _stuck_pen = min(MAX_STUCK_PENALTY, ((holding_hours - STUCK_HOURS_THRESHOLD) / 24) * STUCK_PENALTY_PER_DAY)
+    features["stuck_penalty"] = round(_stuck_pen, 4)
     # 진입 시점 피처 (capture_entry_context에서)
     if entry_context:
         features["entry_rsi"] = entry_context.get("entry_rsi")
@@ -1240,6 +1343,17 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         features["entry_volume_ratio"] = entry_context.get("entry_volume_ratio")  # v5.74: BUG FIX — "volume_ratio"→"entry_volume_ratio" (v5.52 이후 항상 None)
         features["entry_price_percentile"] = entry_context.get("entry_price_percentile")  # v5.74: BUG FIX — "price_percentile"→"entry_price_percentile" (v5.50 최저가필터 ML 추적 복원)
         features["entry_btc_change"] = entry_context.get("btc_change_pct")
+        # v5.81: exit-time 포트폴리오 메트릭 추출 (webhook 스키마 동기화)
+        # 근거: DCA 차수별 수익률 편차 ML 분리 학습 (F5 KITE+3.2% vs SONIC-1.9%)
+        features["dca_count"] = entry_context.get("dca_count", 0)
+        features["dca_exhausted"] = 1 if entry_context.get("dca_count", 0) >= DCA_MAX_ADDS else 0
+        features["tp_level"] = entry_context.get("tp_level", 0)
+        features["market_rising"] = entry_context.get("market_rising", 0)
+        # v5.90: Portfolio ML context JSONL 동기화 (webhook 스키마 일치)
+        features["portfolio_slot_ratio"] = entry_context.get("portfolio_slot_ratio")
+        features["portfolio_dca_exhausted_count"] = entry_context.get("portfolio_dca_exhausted_count")
+        features["portfolio_tp1_done_ratio"] = entry_context.get("portfolio_tp1_done_ratio")
+        features["portfolio_avg_hold_days"] = entry_context.get("portfolio_avg_hold_days")
     # 청산 시점 피처
     if candles_df is not None and len(candles_df) >= 20:
         try:
@@ -1275,6 +1389,11 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     features["sl_distance_pct"] = round(LOSS_CUT_PCT - abs(min(pnl_pct or 0, 0)), 2)
     features["position_age_days"] = round((holding_hours or 0) / 24, 2)
     features["pnl_per_day"] = round((pnl_pct or 0) / max((holding_hours or 0) / 24, 0.04), 4)
+    # v5.99: 주말/시간 피처 — webhook 스키마 동기화 (주말 유동성 패턴 ML 학습)
+    _exit_kst = utc_now().astimezone(KST)
+    features["is_weekend"] = 1 if _exit_kst.weekday() >= 5 else 0
+    features["exit_day_of_week"] = _exit_kst.weekday()
+    features["exit_hour_kst"] = _exit_kst.hour
     # JSONL 로깅
     try:
         with open(ML_FEATURE_LOG, "a") as f:
@@ -1369,9 +1488,24 @@ def record_trade(ticker, side, price, volume, krw_amount, reason="", entry_price
 def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason, entry_price, pnl_pct,
                                   extra_data=None, candles_df=None, entry_context=None):
     """매도 체결 시 오케스트레이터에 분석 webhook 발송 + JSONL 로깅 (비동기, 실패 시 로그 출력)."""
-    # JSONL 로깅 — build_trade_features 호출 (v5.70: 호출부 연결)
+    # JSONL 로깅 — build_trade_features 호출 (v5.81: exit-time 메트릭 병합)
     try:
         _ec = entry_context or (extra_data or {})
+        # v5.81: exit-time 포트폴리오 메트릭을 JSONL에 전파 (ML 스키마 동기화)
+        # 근거: webhook에 dca_count/tp_level/market_rising 있으나 JSONL 누락
+        # F5 DCA KITE +3.2% 패턴을 dca_count별 분리 학습에 필요
+        # Codex: dict() 복사로 원본 entry_context 보존 (부작용 방지)
+        _ec_for_jsonl = dict(entry_context or {})
+        if extra_data:
+            _ec_for_jsonl["dca_count"] = extra_data.get("dca_count", 0)
+            _ec_for_jsonl["tp_level"] = extra_data.get("tp_level", 0)
+            _ec_for_jsonl["market_rising"] = extra_data.get("market_rising", 0)
+            _ec_for_jsonl["min_pnl_during_hold"] = extra_data.get("min_pnl_during_hold", 0)
+            # v5.90: Portfolio ML context JSONL 전파 (webhook 스키마 동기화)
+            _ec_for_jsonl["portfolio_slot_ratio"] = extra_data.get("portfolio_slot_ratio")
+            _ec_for_jsonl["portfolio_dca_exhausted_count"] = extra_data.get("portfolio_dca_exhausted_count")
+            _ec_for_jsonl["portfolio_tp1_done_ratio"] = extra_data.get("portfolio_tp1_done_ratio")
+            _ec_for_jsonl["portfolio_avg_hold_days"] = extra_data.get("portfolio_avg_hold_days")
         build_trade_features(
             ticker=ticker, action=side, entry_price=entry_price, exit_price=price,
             pnl_pct=pnl_pct,
@@ -1379,7 +1513,7 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
             regime=(extra_data or {}).get("exit_regime", ""),
             entry_score=_ec.get("entry_score", 0),
             candles_df=candles_df,
-            entry_context=entry_context,
+            entry_context=_ec_for_jsonl,
             max_pnl=(extra_data or {}).get("max_pnl_during_hold"),
             btc_change_pct=(extra_data or {}).get("btc_change_pct"),
         )
@@ -1417,11 +1551,53 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
         print(f"   ⚠️ webhook 스레드 생성 실패: {e}")
 
 
-def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_score=0, market_rising_count=0, pnl_pct=0):
-    """webhook extra_data — 33컬럼 ML 피처 전부 채우기.
+def _calc_portfolio_ml_features(portfolio):
+    """포트폴리오 상태 ML 피처 4종 — 청산 시점 포트폴리오 컨텍스트.
+
+    v5.90: F2(슬롯 포화)+F4(DCA 소진) 패턴 학습 데이터.
+    portfolio=None이면 빈 dict 반환 (하위 호환 — Gemini/Codex/리스크매니저 합의).
+    """
+    if portfolio is None:
+        return {}
+    try:
+        active = {k: v for k, v in portfolio.items()
+                  if k not in ("_meta", "_sell_memory") and isinstance(v, dict)}
+        count = len(active)
+        if count == 0:
+            return {}
+        dca_exhausted = sum(1 for v in active.values()
+                           if v.get("dca_count", 0) >= DCA_MAX_ADDS)
+        tp1_done = sum(1 for v in active.values()
+                       if v.get("tp_level", 0) >= 1)
+        now = utc_now()
+        hold_days_list = []
+        for v in active.values():
+            ed = v.get("entry_date", "")
+            if ed and ed != "synced":
+                try:
+                    edt = datetime.fromisoformat(ed)
+                    if edt.tzinfo is None:
+                        edt = edt.replace(tzinfo=timezone.utc)
+                    hold_days_list.append((now - edt).total_seconds() / 86400)
+                except (ValueError, TypeError):
+                    pass
+        avg_hold = round(sum(hold_days_list) / max(len(hold_days_list), 1), 1) if hold_days_list else 0
+        return {
+            "portfolio_slot_ratio": round(count / max(1, MAX_CONCURRENT_POSITIONS), 3),
+            "portfolio_dca_exhausted_count": dca_exhausted,
+            "portfolio_tp1_done_ratio": round(tp1_done / max(1, count), 3),
+            "portfolio_avg_hold_days": avg_hold,
+        }
+    except Exception:
+        return {}
+
+
+def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_score=0, market_rising_count=0, pnl_pct=0, portfolio=None):
+    """webhook extra_data — ML 피처 전부 채우기.
 
     pos: portfolio[ticker] (entry_context 포함)
     r: analyze_ticker 결과 (현재 시점 지표)
+    portfolio: 전체 포트폴리오 dict (None이면 포트폴리오 피처 생략 — 하위 호환)
     """
     from datetime import timezone, timedelta
     KST = timezone(timedelta(hours=9))
@@ -1451,8 +1627,12 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         # [E] 포지션 메타
         "hold_hours": hold_hours,
         "dca_count": pos.get("dca_count", 0) if isinstance(pos, dict) else 0,
+        "dca_exhausted": 1 if (isinstance(pos, dict) and pos.get("dca_count", 0) >= DCA_MAX_ADDS) else 0,
         "tp_level": pos.get("tp_level", 0) if isinstance(pos, dict) else 0,
         "max_pnl_during_hold": pos.get("high_pnl", 0) if isinstance(pos, dict) else 0,
+        # v5.83: MAE — 보유 중 최저 PnL (경로 하방 극값, ML V반등 패턴 감지)
+        "min_pnl_during_hold": pos.get("low_pnl", 0) if isinstance(pos, dict) else 0,
+        "mae_recovery_pp": round(max(-50.0, min(50.0, pnl_pct - (pos.get("low_pnl", 0) if isinstance(pos, dict) else 0))), 2),
         # v5.72: MFE 포착률 — 보유 중 최고 수익 대비 청산 수익 비율 (진입 품질 vs 운 분리)
         # 1.0=최고점 청산, 0.0=수익 전량 반납, <0=수익→손실 전환
         "mfe_capture_ratio": round(max(-2.0, min(1.0, pnl_pct / pos["high_pnl"])), 4) if isinstance(pos, dict) and pos.get("high_pnl", 0) > 0 else (1.0 if pnl_pct >= 0 else 0.0),
@@ -1464,6 +1644,8 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         # v5.67: 야간 매수 피처 (F5 — ML이 야간/주간 진입 품질 차이 학습)
         "entry_is_night": ec.get("entry_is_night", 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0),
         "exit_is_night": 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0,
+        # v5.99: 주말 피처 (Gemini/Codex 합의 — 주말 유동성 20~30% 감소 패턴 학습)
+        "is_weekend": 1 if now_kst.weekday() >= 5 else 0,
         # [G] 라벨 — quality_score + trade_valid + alpha_pnl
         "quality_score": compute_trade_quality_score(
             pnl_pct, hold_hours,
@@ -1481,6 +1663,8 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "pnl_per_day": round(pnl_pct / max(hold_hours / 24, 0.04), 4),
         # [K] v5.76: stuck position 피처 (F4 — 6종목 체류 패턴 ML 학습, Codex/Gemini 합의)
         "is_stuck": 1 if (hold_hours > STUCK_HOURS_THRESHOLD and pnl_pct < 0) else 0,
+        # v5.93: stuck_age_days — 이진→연속 에이징 (F3/F4: 7일vs30일 체류 ML 구분)
+        "stuck_age_days": round(max(0, hold_hours - STUCK_HOURS_THRESHOLD) / 24, 2) if (hold_hours > STUCK_HOURS_THRESHOLD and pnl_pct < 0) else 0.0,
         "loss_band": 0 if pnl_pct >= 0 else (1 if pnl_pct >= -2 else (2 if pnl_pct >= -5 else (3 if pnl_pct >= -10 else 4))),
         # [I] v5.57: ML 피처 확장 — 점수 분해 + 시장 미시구조 (Gemini Priority 1)
         "exit_trend_score": round(r.get("trend_score", 0), 1),
@@ -1507,6 +1691,15 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "tp2_reached": 1 if (isinstance(pos, dict) and pos.get("high_pnl", 0) >= PROFIT_TARGET_2ND) else 0,
         "distance_to_tp2_pct": round(PROFIT_TARGET_2ND - pnl_pct, 2),
         "mfe_to_tp1_ratio": round((pos.get("high_pnl", 0) if isinstance(pos, dict) else 0) / max(get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0), 0.1), 2),
+        # v5.88: ML 거리 피처 확장 — CATASTROPHIC 방어계층 복원(F1) + TP1 거리 학습
+        # catastrophic_distance_pct: CATASTROPHIC(20%)까지 남은 거리%p (pnl=-15% → 5%p 남음)
+        # distance_to_tp1_pct: 레짐별 TP1까지 남은 거리%p (pnl=+1%, TP1=3% → 2%p 남음)
+        "catastrophic_distance_pct": round(CATASTROPHIC_STOP_PCT + pnl_pct, 2),
+        "distance_to_tp1_pct": round(get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0) - pnl_pct, 2),
+        # v5.97: 체류 페널티 — quality_score 감점 원인 투명화 (F5 webhook 동기화)
+        "stuck_penalty": round(min(MAX_STUCK_PENALTY, max(0, hold_hours - STUCK_HOURS_THRESHOLD) / 24 * STUCK_PENALTY_PER_DAY), 4) if hold_hours > STUCK_HOURS_THRESHOLD else 0.0,
+        # [M] v5.90: Portfolio ML context (F2+F4 — 포트폴리오 상태 학습)
+        **_calc_portfolio_ml_features(portfolio),
     }
 
 
@@ -1549,11 +1742,17 @@ def execute_buy(ticker, krw_amount):
 
 
 def execute_sell(ticker, volume):
-    """시장가 매도 (코인 수량 기반)"""
+    """시장가 매도 (코인 수량 기반). 평가액 < 5,000원이면 DUST 반환."""
     upbit = get_upbit()
     if not upbit:
         return None
     try:
+        # v5.92: Upbit 최소주문금액(5,000원) 체크 — 먼지 포지션 매도 실패 방지
+        cur_price = pyupbit.get_current_price(ticker)
+        if cur_price and volume * cur_price < 5000:
+            name = ticker.replace("KRW-", "")
+            print(f"   🧹 {name} 먼지 포지션 (₩{volume * cur_price:,.0f} < ₩5,000) — 매도 생략")
+            return {"dust": True, "ticker": ticker, "volume": volume, "value_krw": volume * cur_price}
         resp = upbit.sell_market_order(ticker, volume)
         if resp and resp.get("uuid"):
             print(f"   ✅ 매도 주문 접수: {ticker} {volume} (uuid: {resp['uuid'][:8]}...)")
@@ -1593,7 +1792,7 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl", "sl_partial_done", "entry_context"):
+                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl", "low_pnl", "sl_partial_done", "entry_context"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
             if "dca_count" not in actual[t]:
@@ -1673,7 +1872,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.72"
+        meta["version"] = "5.99"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -2747,7 +2946,7 @@ def format_signal_message(r):
 
 def format_status_message(results, regime_info, fear_greed):
     now = utc_now().strftime('%Y-%m-%d %H:%M')
-    msg = f"🪙 <b>코인 리포트 v5.62</b> ({now} UTC)\n"
+    msg = f"🪙 <b>코인 리포트 v5.92</b> ({now} UTC)\n"
     msg += f"🧠 공포탐욕: {format_fear_greed(fear_greed)}\n"
     msg += f"🌍 시장(BTC): {get_regime_emoji(regime_info['regime'])}\n"
 
@@ -3116,7 +3315,9 @@ def main():
                 sell_vol = vol * PARTIAL_SELL_RATIO_1
                 if can_trade and sell_vol > 0:
                     order = execute_sell(ticker, sell_vol)
-                    if order:
+                    if order and order.get("dust"):
+                        print(f"   💰 {name} TP1 분할매도 금액 부족 — 스킵")
+                    elif order:
                         record_order(order_log, ticker, "SELL")
                         record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "TP1", entry_p, pnl_pct)
                         pos["tp_level"] = 1
@@ -3134,7 +3335,7 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP1", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct),
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct, portfolio=portfolio),
                             candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                         )
                 elif not can_trade:
@@ -3146,7 +3347,9 @@ def main():
                 sell_vol = vol * PARTIAL_SELL_RATIO_2
                 if can_trade and sell_vol > 0:
                     order = execute_sell(ticker, sell_vol)
-                    if order:
+                    if order and order.get("dust"):
+                        print(f"   💰 {name} TP2 분할매도 금액 부족 — 스킵")
+                    elif order:
                         record_order(order_log, ticker, "SELL")
                         record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "TP2", entry_p, pnl_pct)
                         pos["tp_level"] = 2
@@ -3208,7 +3411,9 @@ def main():
                         partial_sl1_done = False
                         if can_trade and sell_vol > 0:
                             order = execute_sell(ticker, sell_vol)
-                            if order:
+                            if order and order.get("dust"):
+                                print(f"   🛡️ {name} SL1 분할손절 금액 부족 — 스킵")
+                            elif order:
                                 record_order(order_log, ticker, "SELL")
                                 record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "PARTIAL_SL1", entry_p, pnl_pct)
                                 # v5.48: 분할손절 분석 webhook
@@ -3271,6 +3476,9 @@ def main():
             if r["signal"] not in ("CLOSE", "STRONG_CLOSE"):
                 high_pnl = max(pos.get("high_pnl", 0), pnl_pct)
                 pos["high_pnl"] = high_pnl
+                # v5.83: MAE — 보유 중 최저 PnL 추적 (ML V반등 패턴 학습)
+                low_pnl = min(pos.get("low_pnl", 0), pnl_pct)
+                pos["low_pnl"] = low_pnl
                 # v5.78: TP2 후 잔여 20%에 타이트 콜백 (F7 ENSO +9.5%→+3.7% 이익 반납 방지)
                 _callback = TRAILING_CALLBACK_POST_TP2 if tp_level >= 2 else TRAILING_CALLBACK_PCT
                 if high_pnl >= TRAILING_ACTIVATE_PCT and (high_pnl - pnl_pct) >= _callback:
@@ -3295,7 +3503,9 @@ def main():
                         sell_vol = vol * PARTIAL_SELL_RATIO_1
                         if can_trade and sell_vol > 0:
                             order = execute_sell(ticker, sell_vol)
-                            if order:
+                            if order and order.get("dust"):
+                                print(f"   📊 {name} RSI 분할익절 금액 부족 — 스킵")
+                            elif order:
                                 record_order(order_log, ticker, "SELL")
                                 record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "RSI_SELL_TP1", entry_p, pnl_pct)
                                 pos["tp_level"] = 1
@@ -3346,10 +3556,21 @@ def main():
                         elif sig_pnl < 0:
                             r["signal"] = "HOLD"
                             print(f"   ⏳ {name} 신호 매도 유예 (손실 {sig_pnl:+.1f}% — SL(-{LOSS_CUT_PCT}%)까지 대기)")
-                        # v5.80: TP 레벨별 신호매도 최소 PnL (F5 — TP2 후 잔여 20% 상방 포착)
+                        # v5.95: TP 레벨별 신호매도 최소 PnL 레짐 적응형 (F2 — TP1+SIGNAL 0.34%p 격차 해소)
+                        # 근거: TP1 평균 +3.37%/SIGNAL 평균 +3.71% → 잔여 50% 상방 포기 패턴
+                        # tp_level=0: MIN_SIGNAL_EXIT_PNL (+3%, TP1 이전 순수 신호매도)
+                        # tp_level=1: 레짐별 TP1 + 2%p (BEAR:4%, SIDEWAYS:5%, BULL:6%) — TP2 근접 허용
+                        # tp_level>=2: PROFIT_TARGET_2ND (+8%, 잔여 20% stretch 타겟)
+                        # 전원 리뷰 반영: 상수 5.0 하드코딩 제거 → 레짐 TP1 파생 (RiskMgr/Codex/Gemini 합의)
                         else:
                             _tp_lvl = portfolio[ticker].get("tp_level", 0)
-                            _min_sig_pnl = PROFIT_TARGET_2ND if _tp_lvl >= 2 else MIN_SIGNAL_EXIT_PNL
+                            if _tp_lvl >= 2:
+                                _min_sig_pnl = PROFIT_TARGET_2ND
+                            elif _tp_lvl >= 1:
+                                _regime_tp1 = get_regime_scoring(regime_info["regime"]).get("tp1_pct", 3.0)
+                                _min_sig_pnl = max(_regime_tp1 + 2.0, MIN_SIGNAL_EXIT_PNL)
+                            else:
+                                _min_sig_pnl = MIN_SIGNAL_EXIT_PNL
                             if sig_pnl < _min_sig_pnl:
                                 r["signal"] = "HOLD"
                                 print(f"   ⏳ {name} 신호 매도 유예 (PnL {sig_pnl:+.1f}% < +{_min_sig_pnl}%, TP{_tp_lvl})")
@@ -3587,7 +3808,14 @@ def main():
                         print(f"   ℹ️ {name} 최근 {ORDER_COOLDOWN_MINUTES}분 내 매도 주문 — 중복 방지")
                     else:
                         order = execute_sell(ticker, vol)
-                        if order:
+                        if order and order.get("dust"):
+                            # v5.92: 먼지 포지션 — 매도 불가(< ₩5,000)이므로 포트폴리오에서 제거
+                            entry_p = portfolio[ticker]["entry_price"]
+                            del portfolio[ticker]
+                            portfolio_tickers.discard(ticker)
+                            send_telegram(f"🧹 <b>{name}</b> 먼지 정리 (₩{order['value_krw']:,.0f}) — 포트폴리오 제거")
+                            print(f"   🧹 {name} 먼지 포지션 제거 (₩{order['value_krw']:,.0f})")
+                        elif order:
                             record_order(order_log, ticker, "SELL")
                             signal_fired = True
                             entry_p = portfolio[ticker]["entry_price"]
@@ -3732,7 +3960,12 @@ def main():
             print(f"   🗑️ {_name} 장기 미회복 정리: {_hold_days:.0f}일 보유, high_pnl={_high:+.1f}%, 현재 PnL={_pnl:+.1f}%")
             if can_trade and _vol_pos > 0:
                 order = execute_sell(_t, _vol_pos)
-                if order:
+                if order and order.get("dust"):
+                    # v5.92: 먼지 포지션 — 포트폴리오에서 제거
+                    del portfolio[_t]
+                    send_telegram(f"🧹 <b>{_name}</b> 먼지 정리 (₩{order['value_krw']:,.0f}) — 포트폴리오 제거")
+                    print(f"   🧹 {_name} 먼지 포지션 제거 (₩{order['value_krw']:,.0f})")
+                elif order:
                     record_order(order_log, _t, "SELL")
                     record_trade(_t, "SELL", _cp, _vol_pos, _vol_pos * _cp, "STUCK_CLEANUP", _ep, _pnl)
                     _send_trade_analysis_webhook(

@@ -74,7 +74,7 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v5.48)
+## 현재 상태 (v5.100)
 - 전종목 자동 스캔 (~241종목, 투자유의/위험 종목 자동 제외)
 - 신호 생성: 1시간봉 450개 (~19일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
@@ -96,14 +96,17 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - 의존성: pyupbit, pandas, numpy, requests, matplotlib, mplfinance
 - 환경변수: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, INITIAL_CAPITAL
 
-## 주요 파라미터 (v5.48)
-- 분할 익절: TP1 +3%(50%) → TP2 +8%(30%) → TP3 +12%(전량)
-- 분할 손절: SL1 -4%(50%) → SL2 -6%(나머지) — v5.48 신설
-- DCA: 진입가 대비 -7% 하락 시 나머지 40% 추가매수 (v5.48: 5→7%)
-- 신호 캔들: 1시간봉 450개 ~19일 (v5.48: 300→450)
-- STOP_COOLDOWN_HOURS = 4 (스탑 후 재진입 쿨다운)
-- MAX_CONCURRENT_POSITIONS = 12, MAX_PORTFOLIO_EXPOSURE = 0.85
+## 주요 파라미터 (v5.100)
+- 분할 익절: TP1 레짐별(BEAR 2%/SIDE 3%/BULL 4%) 50% → TP2 +7%(60%) → TP3 +10%(전량)
+- 손절: CATASTROPHIC -20%(v5.99 복원) 외 분할SL 비활성 (v5.53 전략 전환)
+- DCA: 진입가 대비 -10% 하락 시 잔여 추가매수, 최대 2회
+- 신호 캔들: 1시간봉 450개 ~19일
+- MAX_CONCURRENT_POSITIONS = 25, MAX_POSITION_PCT = 0.05 (5%)
+- MAX_PORTFOLIO_EXPOSURE = 0.90, MAX_HOLD_DAYS = 180
+- STUCK_CLEANUP_DAYS = 60 (v5.99: 90→60일 — 슬롯 포화 완화)
 - CIRCUIT_BREAKER_DD = 0.15, DAILY_DD_LIMIT = 0.08
+- 먼지 포지션(< ₩5,000) 자동 정리 (v5.92)
+- 체류 페널티: 7일+ 보유 시 일당 -0.01 quality_score (v5.97, 상한 0.2)
 
 ## 버전 히스토리
 - v1.0: stock-alert v7.6 기반 초기 구현
@@ -114,4 +117,11 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - v3.2: 빠른 손절(ATR×2.0) + 24h 쿨다운 → BTC -3.7% 하락장에서 +5.7% 수익
 - v3.3: 최소 보유 3시간, 매도 후 즉시 재매수 허용 (자본 회전 버그 수정)
 - v5.34~v5.46: 전종목 자동 스캔, 분할매수매도, 레짐별 적응형, 투자유의 차단 등
-- v5.48: 분할 손절(SL1 -4%→50%, SL2 -6%→나머지) + DCA 간격 7% + 봉 수 450
+- v5.48: 분할 손절 + DCA 간격 7% + 봉 수 450
+- v5.53: 전략 전환 — 분할SL 제거, 건당 5% 20종목 분산, 익절만 반복
+- v5.69~v5.91: ML 피처 확장 (3-class 분류, MFE, 포트폴리오 컨텍스트 등)
+- v5.92: 먼지 포지션(< ₩5,000) 매도 반복 실패 수정
+- v5.93~v5.96: stuck_age_days ML 피처, SIGNAL 매도 레짐 적응형 계층화
+- v5.97~v5.98: 체류 페널티 (7일+ quality_score 감점) + stuck_penalty ML 피처
+- v5.99: CATASTROPHIC 30→20% 복원, STUCK_CLEANUP 90→60일, is_weekend/exit시간 ML 피처
+- v5.100: 독스트링 + 메타 버전 태그 정리
