@@ -1,7 +1,7 @@
 """
-🪙 Coin Alert System v5.100 — Upbit KRW 자동매매
+🪙 Coin Alert System v6.00 — Upbit KRW 자동매매
 
-v5.100: Quick Fix 적용 (2026-04-19)
+v6.00: Quick Fix 적용 (2026-04-19)
 - [Quick Fix] 메타 버전 태그 5.97→5.99 (버그 수정)
 - [Quick Fix] ML is_weekend 피처 — _build_webhook_extra (ML Priority 1)
 - [Quick Fix] ML is_weekend + exit 시간 피처 — build_trade_features JSONL 동기화 (ML Priority 1)
@@ -1872,7 +1872,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "5.99"
+        meta["version"] = "6.00"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
