@@ -335,7 +335,7 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 | v5.93 | stuck_age_days | stuck 이진→연속 에이징 (7일vs30일 ML 구분) |
 | v5.96 | SIGNAL 매도 레짐 적응형 | TP1 후 신호매도 임계 계층화 (F2 상방 포착) |
 | v5.97 | stuck_penalty | 7일+ 체류 기회비용 감점 (quality_score) |
-| v5.99 | is_weekend, exit_day_of_week, exit_hour_kst + CATASTROPHIC 20% | 주말/시간 피처 + 계층 방어 복원 + STUCK_CLEANUP 60일 |
+| v5.99 | is_weekend, exit_day_of_week, exit_hour_kst | 주말/시간 피처 + STUCK_CLEANUP 90→60일 |
 | v5.100 | (메타 정리) | 독스트링 + 메타 버전 태그 동기화 |
 
 ---
@@ -359,7 +359,7 @@ STUCK_HOURS_THRESHOLD      = 168h         (7일 이상 보유 → stuck)
 
 PARTIAL_SL_ENABLED         = False        (분할 손절 비활성)
 LOSS_CUT_PCT               = 30%          (상폐 방어만)
-CATASTROPHIC_STOP_PCT      = 20%          (계층 방어 복원 — v5.99: 30→20%)
+CATASTROPHIC_STOP_PCT      = 30%          (상폐 방어만 — v5.71: 20→30% 복원)
 TP1_BREAKEVEN_SL           = False        (v5.71: TP1 후 잔여분 버티기)
 TRAILING_CALLBACK_POST_TP2 = 1.5%         (v5.79: TP2 후 타이트 콜백 — ENSO 이익반납 방지)
 MAX_HOLD_DAYS              = 180          (사실상 무제한)

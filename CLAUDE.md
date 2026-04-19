@@ -98,7 +98,7 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 
 ## 주요 파라미터 (v5.100)
 - 분할 익절: TP1 레짐별(BEAR 2%/SIDE 3%/BULL 4%) 50% → TP2 +7%(60%) → TP3 +10%(전량)
-- 손절: CATASTROPHIC -20%(v5.99 복원) 외 분할SL 비활성 (v5.53 전략 전환)
+- 손절: CATASTROPHIC -30%(상폐 방어) 외 분할SL 비활성 (v5.53 전략 전환)
 - DCA: 진입가 대비 -10% 하락 시 잔여 추가매수, 최대 2회
 - 신호 캔들: 1시간봉 450개 ~19일
 - MAX_CONCURRENT_POSITIONS = 25, MAX_POSITION_PCT = 0.05 (5%)
@@ -123,5 +123,5 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - v5.92: 먼지 포지션(< ₩5,000) 매도 반복 실패 수정
 - v5.93~v5.96: stuck_age_days ML 피처, SIGNAL 매도 레짐 적응형 계층화
 - v5.97~v5.98: 체류 페널티 (7일+ quality_score 감점) + stuck_penalty ML 피처
-- v5.99: CATASTROPHIC 30→20% 복원, STUCK_CLEANUP 90→60일, is_weekend/exit시간 ML 피처
+- v5.99: STUCK_CLEANUP 90→60일, is_weekend/exit시간 ML 피처
 - v5.100: 독스트링 + 메타 버전 태그 정리
