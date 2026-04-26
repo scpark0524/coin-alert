@@ -1836,7 +1836,9 @@ def sync_portfolio_with_upbit(portfolio):
             volume = float(b.get("balance", 0)) + float(b.get("locked", 0))
             avg_price = float(b.get("avg_buy_price", 0))
             # v5.2: TICKERS + 포트폴리오 보유 종목 모두 동기화 (고아 포지션 포함)
-            if (ticker in TICKERS or ticker in portfolio) and volume > 0:
+            # v6.01: 먼지 포지션(< ₩5,000) 동기화 제외 — 매도 불가 잔량 재등록 방지
+            value_krw = volume * avg_price if avg_price > 0 else 0
+            if (ticker in TICKERS or ticker in portfolio) and volume > 0 and value_krw >= 5000:
                 actual[ticker] = {
                     "volume": volume,
                     "entry_price": avg_price,
