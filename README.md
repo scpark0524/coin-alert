@@ -1,4 +1,4 @@
-# Coin Alert v6.00 — Upbit KRW 시스템 매매
+# Coin Alert v6.01 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -337,10 +337,11 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 | v5.97 | stuck_penalty | 7일+ 체류 기회비용 감점 (quality_score) |
 | v5.99 | is_weekend, exit_day_of_week, exit_hour_kst | 주말/시간 피처 + STUCK_CLEANUP 90→60일 |
 | v6.00 | (메타 정리) | 독스트링 + 메타 버전 태그 동기화 |
+| v6.01 | score_*_pts (6종), btc_volatility_24h, ml_regime_group, entry_is_weekend, exit_regime_group, entry_hour/night/day JSONL 복원 | 스코어 팩터 분해 + BTC 변동성 + 레짐 그룹 ML 피처 확장 |
 
 ---
 
-## 주요 파라미터 (v6.00)
+## 주요 파라미터 (v6.01)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)

@@ -1,5 +1,14 @@
 """
-🪙 Coin Alert System v6.00 — Upbit KRW 자동매매
+🪙 Coin Alert System v6.01 — Upbit KRW 자동매매
+
+v6.01: ML 피처 확장 — 스코어 팩터 분해 + BTC 변동성 + 레짐 그룹 (2026-04-26)
+- [ML] 스코어 팩터 분해 — RSI/BB/ADX/SR/Vol/Percentile 6개 개별 기여도 추적
+  → analyze_ticker() → capture_entry_context → webhook → JSONL 전파
+- [ML] btc_volatility_24h — BTC 24h 수익률 표준편차(%) 캡처 (극저 변동성 패턴 학습)
+- [ML] ml_regime_group — 3-class 레짐 그룹 (RISK_OFF/NEUTRAL/RISK_ON) None 버그 수정
+- [ML] entry_is_weekend — 주말 진입 피처 추가
+- [ML] exit_regime_group — 청산 시점 레짐 그룹 JSONL/webhook 동기화
+- [ML] entry_hour_kst/entry_is_night/entry_day_of_week — JSONL←webhook 스키마 동기화
 
 v6.00: Quick Fix 적용 (2026-04-19)
 - [Quick Fix] 메타 버전 태그 5.97→5.99 (버그 수정)
@@ -1343,6 +1352,13 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         features["entry_volume_ratio"] = entry_context.get("entry_volume_ratio")  # v5.74: BUG FIX — "volume_ratio"→"entry_volume_ratio" (v5.52 이후 항상 None)
         features["entry_price_percentile"] = entry_context.get("entry_price_percentile")  # v5.74: BUG FIX — "price_percentile"→"entry_price_percentile" (v5.50 최저가필터 ML 추적 복원)
         features["entry_btc_change"] = entry_context.get("btc_change_pct")
+        # v6.01: 스코어 팩터 분해 — JSONL 전파 (ML 인과분석)
+        features["entry_score_rsi_pts"] = entry_context.get("entry_score_rsi_pts", 0)
+        features["entry_score_bb_pts"] = entry_context.get("entry_score_bb_pts", 0)
+        features["entry_score_adx_pts"] = entry_context.get("entry_score_adx_pts", 0)
+        features["entry_score_sr_pts"] = entry_context.get("entry_score_sr_pts", 0)
+        features["entry_score_vol_pts"] = entry_context.get("entry_score_vol_pts", 0)
+        features["entry_score_percentile_pts"] = entry_context.get("entry_score_percentile_pts", 0)
         # v5.81: exit-time 포트폴리오 메트릭 추출 (webhook 스키마 동기화)
         # 근거: DCA 차수별 수익률 편차 ML 분리 학습 (F5 KITE+3.2% vs SONIC-1.9%)
         features["dca_count"] = entry_context.get("dca_count", 0)
@@ -1358,6 +1374,12 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         features["ml_entry_score"] = entry_context.get("ml_entry_score")
         features["ml_entry_label"] = entry_context.get("ml_entry_label")
         features["ml_regime_group"] = entry_context.get("ml_regime_group")
+        # v6.01: JSONL←webhook 스키마 동기화 — 진입 시간대 피처 복원
+        features["entry_hour_kst"] = entry_context.get("entry_hour_kst")
+        features["entry_is_night"] = entry_context.get("entry_is_night", 0)
+        features["entry_day_of_week"] = entry_context.get("entry_day_of_week")
+        # v6.01: BTC 변동성 피처 (극저 변동성 패턴 학습)
+        features["btc_volatility_24h"] = entry_context.get("btc_volatility_24h", 0)
     # 청산 시점 피처
     if candles_df is not None and len(candles_df) >= 20:
         try:
@@ -1398,6 +1420,9 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     features["is_weekend"] = 1 if _exit_kst.weekday() >= 5 else 0
     features["exit_day_of_week"] = _exit_kst.weekday()
     features["exit_hour_kst"] = _exit_kst.hour
+    # v6.01: exit 레짐 그룹 + entry 주말 피처 — webhook 스키마 동기화
+    features["exit_regime_group"] = "RISK_OFF" if regime in ("BEAR", "MILD_BEAR", "VOLATILE") else ("RISK_ON" if regime in ("BULL", "MILD_BULL") else "NEUTRAL")
+    features["entry_is_weekend"] = (entry_context or {}).get("entry_is_weekend", 0)
     # JSONL 로깅
     try:
         with open(ML_FEATURE_LOG, "a") as f:
@@ -1456,6 +1481,16 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         # v5.67: 야간 매수 피처 (F5 — 83% 야간 매수 편중, ML 인과분석용)
         "entry_is_night": 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0,
         "entry_day_of_week": now_kst.weekday(),
+        # v6.01: ML 레짐 그룹 + 주말 피처 (ml_regime_group None 버그 수정)
+        "entry_is_weekend": 1 if now_kst.weekday() >= 5 else 0,
+        "ml_regime_group": "RISK_OFF" if regime_info.get("regime", "") in ("BEAR", "MILD_BEAR", "VOLATILE") else ("RISK_ON" if regime_info.get("regime", "") in ("BULL", "MILD_BULL") else "NEUTRAL"),
+        # v6.01: 스코어 팩터 분해 — 개별 지표 기여도 (ML 인과분석)
+        "entry_score_rsi_pts": result.get("score_rsi_pts", 0),
+        "entry_score_bb_pts": result.get("score_bb_pts", 0),
+        "entry_score_adx_pts": result.get("score_adx_pts", 0),
+        "entry_score_sr_pts": result.get("score_sr_pts", 0),
+        "entry_score_vol_pts": result.get("score_vol_pts", 0),
+        "entry_score_percentile_pts": result.get("score_percentile_pts", 0),
     }
     bb_upper = result.get("bb_upper", 0)
     bb_lower = result.get("bb_lower", 0)
@@ -1465,6 +1500,9 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         btc_now = float(btc_signal["Close"].iloc[-1])
         btc_24h = float(btc_signal["Close"].iloc[-24])
         ctx["btc_change_pct"] = round((btc_now / btc_24h - 1) * 100, 2) if btc_24h > 0 else 0
+        # v6.01: BTC 24h 변동성 피처 (극저 변동성 패턴 ML 학습)
+        _btc_ret = btc_signal["Close"].pct_change().tail(24).dropna()
+        ctx["btc_volatility_24h"] = round(float(_btc_ret.std()) * 100, 4) if len(_btc_ret) >= 12 else 0
     return ctx
 
 
@@ -1618,6 +1656,13 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "entry_volume_ratio": ec.get("entry_volume_ratio", round(r.get("volume_ratio", 1.0), 2)),
         "entry_price_percentile": ec.get("entry_price_percentile", round(r.get("full_percentile", 50), 1)),
         "entry_score": ec.get("entry_score", round(r.get("ensemble_score", 0), 1)),
+        # v6.01: 스코어 팩터 분해 — webhook 전파 (ML 인과분석)
+        "entry_score_rsi_pts": ec.get("entry_score_rsi_pts", 0),
+        "entry_score_bb_pts": ec.get("entry_score_bb_pts", 0),
+        "entry_score_adx_pts": ec.get("entry_score_adx_pts", 0),
+        "entry_score_sr_pts": ec.get("entry_score_sr_pts", 0),
+        "entry_score_vol_pts": ec.get("entry_score_vol_pts", 0),
+        "entry_score_percentile_pts": ec.get("entry_score_percentile_pts", 0),
         # [C] 청산 시점 — 현재 r에서
         "exit_rsi": round(r.get("rsi", 0), 1),
         "exit_adx": round(r.get("adx", 0), 1),
@@ -1626,6 +1671,7 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "entry_regime": ec.get("entry_regime", exit_regime),
         "exit_regime": exit_regime,
         "btc_change_pct": btc_chg,
+        "btc_volatility_24h": ec.get("btc_volatility_24h", 0),
         "fear_greed": ec.get("fear_greed", fear_greed_score),
         "market_rising": market_rising_count,
         # [E] 포지션 메타
@@ -1650,6 +1696,10 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "exit_is_night": 1 if (now_kst.hour >= 23 or now_kst.hour < 6) else 0,
         # v5.99: 주말 피처 (Gemini/Codex 합의 — 주말 유동성 20~30% 감소 패턴 학습)
         "is_weekend": 1 if now_kst.weekday() >= 5 else 0,
+        # v6.01: 진입 주말 + 레짐 그룹 — JSONL 스키마 동기화
+        "entry_is_weekend": ec.get("entry_is_weekend", 0),
+        "ml_regime_group": ec.get("ml_regime_group", "NEUTRAL"),
+        "exit_regime_group": "RISK_OFF" if exit_regime in ("BEAR", "MILD_BEAR", "VOLATILE") else ("RISK_ON" if exit_regime in ("BULL", "MILD_BULL") else "NEUTRAL"),
         # [G] 라벨 — quality_score + trade_valid + alpha_pnl
         "quality_score": compute_trade_quality_score(
             pnl_pct, hold_hours,
@@ -1876,7 +1926,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "6.00"
+        meta["version"] = "6.01"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -2779,23 +2829,44 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
     # v5.39: 레짐별 적응형 진입 스코어링 (시장 상황에 따라 기준 변동)
     regime_scoring = get_regime_scoring(regime_info["regime"])
     entry_score = 0
+    # v6.01: 스코어 팩터 분해 — ML 인과분석용 (어떤 지표 조합이 손실 거래 유발했는지)
+    score_rsi_pts = 0         # RSI 과매도 기여 (0/1/3)
+    score_bb_pts = 0          # BB 하단 근접 기여 (0/1/2)
+    score_adx_pts = 0         # ADX 약추세 기여 (0/1)
+    score_sr_pts = 0          # 지지선 근접 기여 (0/1)
+    score_vol_pts = 0         # 거래량 급증 기여 (0/1)
+    score_percentile_pts = 0  # 가격위치 감점 (0/-3)
     full_percentile = 50.0  # 기본값 (es <= 0일 때도 반환 dict에 포함)
     if es > 0:  # 매수 신호일 때만 스코어링
         # RSI 과매도 가산 (최대 3점) — 레짐별 기준 적용
         rsi_3pt = regime_scoring["rsi_3pt"]  # BEAR:20, SIDEWAYS:30, BULL:40
         rsi_1pt = regime_scoring["rsi_1pt"]  # BEAR:30, SIDEWAYS:40, BULL:50
-        if rsi <= rsi_3pt:              entry_score += 3  # 레짐별 명확한 과매도
-        elif rsi <= rsi_1pt:            entry_score += 1  # 레짐별 약한 과매도
+        if rsi <= rsi_3pt:
+            entry_score += 3              # 레짐별 명확한 과매도
+            score_rsi_pts = 3
+        elif rsi <= rsi_1pt:
+            entry_score += 1              # 레짐별 약한 과매도
+            score_rsi_pts = 1
         # BB 하단 근접 가산 (최대 2점)
         bb_lower = float(t["BB_Lower"]) if pd.notna(t.get("BB_Lower")) else cp
-        if cp <= bb_lower:              entry_score += 2  # BB 하단 이탈
-        elif cp <= bb_lower * 1.01:     entry_score += 1  # BB 하단 1% 이내
+        if cp <= bb_lower:
+            entry_score += 2              # BB 하단 이탈
+            score_bb_pts = 2
+        elif cp <= bb_lower * 1.01:
+            entry_score += 1              # BB 하단 1% 이내
+            score_bb_pts = 1
         # ADX 약추세 가산 (1점) — 평균회귀에 유리
-        if adx < 25:                    entry_score += 1
+        if adx < 25:
+            entry_score += 1
+            score_adx_pts = 1
         # 지지선 근접 가산 (1점)
-        if sr.get("near_support"):      entry_score += 1
+        if sr.get("near_support"):
+            entry_score += 1
+            score_sr_pts = 1
         # 거래량 급증 가산 (1점)
-        if vr >= 1.5:                   entry_score += 1
+        if vr >= 1.5:
+            entry_score += 1
+            score_vol_pts = 1
         # 24h 가격위치 감점 (대원칙3 "추격매수 절대 금지")
         h24 = data["High"].tail(24).max()
         l24 = data["Low"].tail(24).min()
@@ -2803,6 +2874,7 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
             percentile = (cp - l24) / (h24 - l24) * 100
             if percentile >= PRICE_PERCENTILE_BLOCK:
                 entry_score -= PRICE_PERCENTILE_PENALTY  # 고점 구간 -3점
+                score_percentile_pts = -PRICE_PERCENTILE_PENALTY
 
         # v5.50: 최저가 기준 거리 매수 필터 (최저가 대비 몇% 위인지)
         full_low = float(data["Low"].min())
@@ -2893,6 +2965,10 @@ def analyze_ticker(ticker, data, regime_info, regime_weights, fear_greed,
         "trend_score": ts, "mean_rev_score": ms, "breakout_score": bks, "momentum_pred_score": mps,
         "ensemble_score": es, "confidence": conf, "entry_score": entry_score, "vwap": vwap,
         "full_percentile": round(full_percentile, 1),
+        # v6.01: 스코어 팩터 분해 (ML — 어떤 지표 조합이 손실 거래를 유발했는지 분석)
+        "score_rsi_pts": score_rsi_pts, "score_bb_pts": score_bb_pts,
+        "score_adx_pts": score_adx_pts, "score_sr_pts": score_sr_pts,
+        "score_vol_pts": score_vol_pts, "score_percentile_pts": score_percentile_pts,
         "backtest": bt, "weekly": wk, "position": ps,
         "volume_24h": vol_24h,
     }
