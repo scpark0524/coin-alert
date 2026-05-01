@@ -1,4 +1,4 @@
-# Coin Alert v6.01 — Upbit KRW 시스템 매매
+# Coin Alert v6.06 — Upbit KRW 시스템 매매
 
 평균회귀 기반 자동매매 + **손절 없이 익절만 반복**하는 구조.
 
@@ -19,7 +19,7 @@ Upbit 전종목 스캔 (~242종목)
   → 매수 실행 (5% × 20종목 분산)
   → 보유: TP 도달까지 대기 (최대 180일)
   → 매도: 익절만 실행 (-30% 상폐 방어 제외)
-  → 매매 분석 webhook → ML 피처 45+컬럼 축적
+  → 매매 분석 webhook → ML 피처 60+컬럼 축적
 ```
 
 | 항목 | 값 |
@@ -84,8 +84,8 @@ Upbit 전종목 스캔 (~242종목)
 
 ```
 건당 비중: 5% (MAX_POSITION_PCT = 0.05)
-최대 동시 보유: 20종목 (MAX_CONCURRENT_POSITIONS = 20)
-최대 노출: 85%
+최대 동시 보유: 25종목 (MAX_CONCURRENT_POSITIONS = 25)
+최대 노출: 90%
 DCA 최대: 5% × 3회 = 15% (한 종목 최대 노출)
 → 한 종목이 -30% 되어도 전체 자본 대비 -1.5~4.5% 영향
 ```
@@ -130,7 +130,7 @@ DCA 최대: 5% × 3회 = 15% (한 종목 최대 노출)
 #### 6. 장기 미회복 정리 (STUCK_CLEANUP)
 | 조건 (AND) | 값 |
 |------------|-----|
-| 보유 기간 | ≥ **90일** |
+| 보유 기간 | ≥ **60일** |
 | 최고 PnL | < **1%** (한 번도 의미있게 반등 안 함) |
 | 거래대금 | < **50억** (소형주만 — BTC/ETH 등 대형주 제외) |
 
@@ -172,7 +172,7 @@ BULL         +4%     ≥ 80     -30%만    180일   ≤ 15%       ≥ 5점
 - 자본 잠김 조기 감지 → 신규 매수 자금 부족 위험 경고
 
 ### 장기 미회복 자동 정리
-- 90일+ 보유 & high_pnl < 1% & 거래대금 50억 미만 → 자동 매도
+- 60일+ 보유 & high_pnl < 1% & 거래대금 50억 미만 → 자동 매도
 - 대형주 제외, 소형주 중 죽은 포지션만 정리하여 자금 회수
 
 ---
@@ -338,10 +338,15 @@ quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 | v5.99 | is_weekend, exit_day_of_week, exit_hour_kst | 주말/시간 피처 + STUCK_CLEANUP 90→60일 |
 | v6.00 | (메타 정리) | 독스트링 + 메타 버전 태그 동기화 |
 | v6.01 | score_*_pts (6종), btc_volatility_24h, ml_regime_group, entry_is_weekend, exit_regime_group, entry_hour/night/day JSONL 복원 | 스코어 팩터 분해 + BTC 변동성 + 레짐 그룹 ML 피처 확장 |
+| v6.02 | entry_market_breadth_pct, entry_slot_utilization | 시장 폭 + 슬롯 점유율 피처 (알트 상관관계 학습) |
+| v6.03 | entry_cash_ratio, btc_pnl_ratio | 현금 비율 + BTC 상관도 프록시 |
+| v6.04 | entry_portfolio_dca_exhausted_ratio, entry_portfolio_avg_hold_days, entry_portfolio_position_count | 포트폴리오 건강도 3종 + TP2/SL1 webhook 버그 수정 |
+| v6.05 | entry_portfolio_tp1_ratio, entry_portfolio_avg_high_pnl | TP1 달성률 + 평균 최고PnL (88% 적자 패턴 학습) |
+| v6.06 | entry_portfolio_avg_low_pnl, entry_portfolio_deep_loss_ratio | Portfolio MAE 2종 (심각 손실 비율 프록시) |
 
 ---
 
-## 주요 파라미터 (v6.01)
+## 주요 파라미터 (v6.06)
 
 ```
 SIGNAL_CANDLES             = 450          (1시간봉 ~19일)

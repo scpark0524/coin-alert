@@ -74,7 +74,7 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v6.01)
+## 현재 상태 (v6.06)
 - 전종목 자동 스캔 (~241종목, 투자유의/위험 종목 자동 제외)
 - 신호 생성: 1시간봉 450개 (~19일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
@@ -96,7 +96,7 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - 의존성: pyupbit, pandas, numpy, requests, matplotlib, mplfinance
 - 환경변수: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, INITIAL_CAPITAL
 
-## 주요 파라미터 (v6.01)
+## 주요 파라미터 (v6.06)
 - 분할 익절: TP1 레짐별(BEAR 2%/SIDE 3%/BULL 4%) 50% → TP2 +7%(60%) → TP3 +10%(전량)
 - 손절: CATASTROPHIC -30%(상폐 방어) 외 분할SL 비활성 (v5.53 전략 전환)
 - DCA: 진입가 대비 -10% 하락 시 잔여 추가매수, 최대 2회

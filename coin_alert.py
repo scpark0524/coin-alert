@@ -1,5 +1,62 @@
 """
-🪙 Coin Alert System v6.01 — Upbit KRW 자동매매
+🪙 Coin Alert System v6.06 — Upbit KRW 자동매매
+
+
+v6.7: Quick Fix 적용 (2026-05-01)
+- [Quick Fix] ML Feature — capture_entry_context Portfolio MAE 피처 2종
+- [Quick Fix] ML Feature — build_trade_features JSONL 동기화
+- [Quick Fix] ML Feature — _build_webhook_extra webhook 동기화
+- [Quick Fix] 메타 버전 태그 6.05→6.06
+- [Quick Fix] 독스트링 버전 + 변경 로그 — F7 재발 방지
+
+v6.06: F7 코드 실적용 + ML Portfolio MAE 피처 (2026-05-01)
+- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지 (KAT -20.5% 사건 교훈)
+- [유지] STUCK_CLEANUP_DAYS 60일 유지
+- [유지] MAX_CONCURRENT_POSITIONS 25 유지
+- [ML] entry_portfolio_avg_low_pnl — 포트폴리오 평균 MAE (F5 88% 적자 패턴 학습)
+- [ML] entry_portfolio_deep_loss_ratio — 심각 손실(-10%↓) 비율 (상관관계 리스크 프록시)
+- [ML] JSONL + webhook 스키마 동기화 (2종 피처)
+
+v6.6: Quick Fix 적용 (2026-04-30)
+- [Quick Fix] ML Feature — capture_entry_context 포트폴리오 수익 이력 피처 추가
+- [Quick Fix] ML Feature JSONL 동기화 — build_trade_features
+- [Quick Fix] ML Feature webhook 동기화 — _build_webhook_extra
+- [Quick Fix] 메타 버전 태그 6.04→6.05
+- [Quick Fix] 독스트링 버전 + 변경 로그 추가
+
+v6.05: 계층 방어 복원 + 슬롯 관리 + ML 포트폴리오 피처 (2026-04-30)
+- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지
+- [유지] STUCK_CLEANUP_DAYS 60일 유지
+- [유지] MAX_CONCURRENT_POSITIONS 25 유지
+- [ML] entry_portfolio_tp1_ratio — 진입 시점 TP1 달성 비율 (포트폴리오 수익 실현력 학습)
+- [ML] entry_portfolio_avg_high_pnl — 진입 시점 평균 최고PnL (상방 도달 이력 학습)
+- [ML] JSONL + webhook 스키마 동기화 (2종 피처)
+
+v6.5: Quick Fix 적용 (2026-04-29)
+- [Quick Fix] `capture_entry_context` 시그니처 확장 — portfolio 파라미터
+- [Quick Fix] `capture_entry_context` body — 포트폴리오 건강도 피처 3종
+- [Quick Fix] `build_trade_features` — JSONL 포트폴리오 건강도 피처 동기화
+- [Quick Fix] `_build_webhook_extra` — webhook 포트폴리오 건강도 피처 전파
+- [Quick Fix] TP2 webhook `portfolio=None` 버그 수정
+- [Quick Fix] PARTIAL_SL1 webhook `portfolio=None` 버그 수정
+- [Quick Fix] 메타 버전 태그 6.03 → 6.04
+- [Quick Fix] 모듈 독스트링 버전 업데이트
+
+v6.04: 포트폴리오 건강도 ML 피처 + TP2/SL1 webhook 버그 수정 (2026-04-29)
+- [ML] capture_entry_context — entry-time 포트폴리오 건강도 피처 3종 (DCA 고갈률/평균보유일/포지션수)
+- [ML] build_trade_features — JSONL 포트폴리오 건강도 피처 동기화
+- [ML] _build_webhook_extra — webhook 포트폴리오 건강도 피처 전파
+- [BUG] TP2/SL1 webhook — portfolio=None 인자 누락 수정 (v5.91 이후 공회전)
+- [FIX] 메타 버전 태그 동기화
+
+v6.2: Quick Fix 적용 (2026-04-28)
+- [Quick Fix] capture_entry_context 시그니처 확장 — cash_ratio
+- [Quick Fix] capture_entry_context body — entry_cash_ratio 필드 추가
+- [Quick Fix] build_trade_features — entry_cash_ratio JSONL 동기화
+- [Quick Fix] build_trade_features — btc_pnl_ratio JSONL 추가
+- [Quick Fix] _build_webhook_extra — entry_cash_ratio webhook 전파
+- [Quick Fix] _build_webhook_extra — btc_pnl_ratio 상관도 프록시
+- [Quick Fix] 메타 버전 태그 6.01→6.03
 
 v6.01: ML 피처 확장 — 스코어 팩터 분해 + BTC 변동성 + 레짐 그룹 (2026-04-26)
 - [ML] 스코어 팩터 분해 — RSI/BB/ADX/SR/Vol/Percentile 6개 개별 기여도 추적
@@ -17,7 +74,7 @@ v6.00: Quick Fix 적용 (2026-04-19)
 - [Quick Fix] 독스트링 v5.99 버전 업데이트 (버그 수정)
 
 v5.99: F1/F2 구조 개선 + ML 주말 피처 (2026-04-19)
-- [CRITICAL] CATASTROPHIC_STOP_PCT 30→20% — 계층 방어 복원 (F1 전원합의)
+- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지
 - [매매] STUCK_CLEANUP_DAYS 90→60일 — 슬롯 포화 25/25 완화 (F2)
 - [ML] is_weekend 피처 — webhook + JSONL 동기화 (주말 유동성 패턴 학습)
 - [ML] exit_day_of_week/exit_hour_kst — JSONL 스키마 동기화
@@ -162,7 +219,7 @@ v5.63: ML 라벨 품질 개선 (2026-03-31)
 v5.62: Quick Fix 적용 (2026-03-31)
 - [Quick Fix] ML_SCORE_WEIGHTS — time_efficiency 가중치 하향 (Priority 1)
 - [Quick Fix] Webhook ML 파생 피처 3종 추가 (Priority 1)
-- [Quick Fix] CATASTROPHIC_STOP_PCT 30→20% — 계층 방어 복원 (Priority 3, F1 전원합의)
+- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지 (KAT 사건)
 - [Quick Fix] 스테이블코인 자동 제외 필터 (Priority 4, F5 전원합의)
 
 v5.60: Quick Fix 적용 (2026-03-30)
@@ -806,7 +863,9 @@ RISK_SL_LOOKBACK_HOURS = 6  # 최근 6시간 내 연속 SL 카운트
 # 매수 차단은 대원칙1 "수익 극대화"에 위배. 개별 종목 리스크는 SL(-5%)이 담당.
 # v5.60: 자금 효율 관리 (손절 아님 — 죽은 포지션 정리)
 STUCK_ALERT_RATIO    = 0.8      # 미실현 손실 포지션이 전체의 80% 넘으면 텔레그램 알림
-STUCK_CLEANUP_DAYS   = 90       # 90일 이상 보유 + high_pnl < 1% → 소형주만 정리
+STUCK_CLEANUP_DAYS   = 60       # v6.02: 90→60일 — F2 슬롯 포화 25/25 완화
+                                # 60일 보유 + high_pnl < 1% + 소형주 → 기회비용 임계
+                                # 근거: 25/25 포화 → 신규매수/DCA 불가, 대원칙5 실행 차단
 STUCK_CLEANUP_MIN_VOL = 5e9     # 정리 대상: 24h 거래대금 50억 미만 (대형주 제외)
 
 REBUY_DROP_PCT       = 3.0      # v4.2: 5→3% (평균회귀 사이클에 맞는 재진입 허용)
@@ -1311,6 +1370,9 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     )
     features["btc_change_pct"] = _btc_chg
     features["alpha_pnl"] = round((pnl_pct or 0) - _btc_chg, 4) if isinstance(_btc_chg, (int, float)) else pnl_pct
+    # v6.03: BTC 상관도 프록시 — PnL÷BTC 변화율 (Codex/Gemini blind spot — 상관관계 리스크)
+    # |BTC chg| < 0.1%이면 노이즈 → None. ratio>2=BTC 2배 레버리지 상당, ratio<0=역상관
+    features["btc_pnl_ratio"] = round((pnl_pct or 0) / _btc_chg, 2) if isinstance(_btc_chg, (int, float)) and abs(_btc_chg) >= 0.1 else None
     # v5.69: 3-class 분류 라벨 (regression + classification 이중 라벨)
     # F2: STUCK_LOSS 패턴 학습 → 진입 시점 피처와 결합하여 인과 분석
     features["trade_class"] = _classify_trade(pnl_pct, holding_hours)
@@ -1370,6 +1432,21 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         features["portfolio_dca_exhausted_count"] = entry_context.get("portfolio_dca_exhausted_count")
         features["portfolio_tp1_done_ratio"] = entry_context.get("portfolio_tp1_done_ratio")
         features["portfolio_avg_hold_days"] = entry_context.get("portfolio_avg_hold_days")
+        # v6.02: 시장 폭 + 슬롯 점유 JSONL 전파 (F2+Gemini — 상관관계/슬롯 학습)
+        features["entry_market_breadth_pct"] = entry_context.get("entry_market_breadth_pct")
+        features["entry_slot_utilization"] = entry_context.get("entry_slot_utilization")
+        # v6.03: 현금 비율 JSONL 동기화 (Codex/Gemini — DCA 여력 ML 학습)
+        features["entry_cash_ratio"] = entry_context.get("entry_cash_ratio")
+        # v6.04: 포트폴리오 건강도 JSONL 동기화 (F2 — entry-time 포트폴리오 상태 ML 학습)
+        features["entry_portfolio_dca_exhausted_ratio"] = entry_context.get("entry_portfolio_dca_exhausted_ratio")
+        features["entry_portfolio_avg_hold_days"] = entry_context.get("entry_portfolio_avg_hold_days")
+        features["entry_portfolio_position_count"] = entry_context.get("entry_portfolio_position_count")
+        # v6.05: TP1 달성률 + 평균 최고PnL JSONL 동기화 (C2 — 88% 적자 패턴)
+        features["entry_portfolio_tp1_ratio"] = entry_context.get("entry_portfolio_tp1_ratio")
+        features["entry_portfolio_avg_high_pnl"] = entry_context.get("entry_portfolio_avg_high_pnl")
+        # v6.06: Portfolio MAE JSONL 동기화 (F5 — 88% 적자 + Gemini 상관관계 프록시)
+        features["entry_portfolio_avg_low_pnl"] = entry_context.get("entry_portfolio_avg_low_pnl")
+        features["entry_portfolio_deep_loss_ratio"] = entry_context.get("entry_portfolio_deep_loss_ratio")
         # v6.00: ML entry score — JSONL accumulation for model feedback loop
         features["ml_entry_score"] = entry_context.get("ml_entry_score")
         features["ml_entry_label"] = entry_context.get("ml_entry_label")
@@ -1448,7 +1525,9 @@ def _save_trade_history(history):
     with open(TRADE_HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
-def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_score=0):
+def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_score=0,
+                          market_breadth_pct=None, slot_utilization=None, cash_ratio=None,
+                          portfolio=None):
     """매수 시점 ML 피처 스냅샷 — 이미 조회된 데이터에서만 계산 (추가 API 호출 없음)."""
     from datetime import timezone, timedelta
     KST = timezone(timedelta(hours=9))
@@ -1503,6 +1582,70 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         # v6.01: BTC 24h 변동성 피처 (극저 변동성 패턴 ML 학습)
         _btc_ret = btc_signal["Close"].pct_change().tail(24).dropna()
         ctx["btc_volatility_24h"] = round(float(_btc_ret.std()) * 100, 4) if len(_btc_ret) >= 12 else 0
+    # v6.02: 시장 폭 + 슬롯 점유 (F2+Gemini — 알트 상관관계 blind spot, 슬롯 포화 학습)
+    ctx["entry_market_breadth_pct"] = round(market_breadth_pct, 1) if market_breadth_pct is not None else None
+    ctx["entry_slot_utilization"] = round(slot_utilization, 3) if slot_utilization is not None else None
+    # v6.03: 현금 비율 (Codex/Gemini — DCA 여력 + 자본 효율 ML 학습)
+    ctx["entry_cash_ratio"] = round(cash_ratio, 3) if cash_ratio is not None else None
+    # v6.04: 포트폴리오 건강도 (F2 — 87% 손실 상태 진입 패턴 ML 학습)
+    if portfolio is not None:
+        _positions = {k: v for k, v in portfolio.items()
+                      if k not in ("_meta", "_sell_memory") and isinstance(v, dict)}
+        _pos_count = len(_positions)
+        if _pos_count > 0:
+            _dca_exhausted = sum(1 for p in _positions.values()
+                                if p.get("dca_count", 0) >= DCA_MAX_ADDS)
+            ctx["entry_portfolio_dca_exhausted_ratio"] = round(_dca_exhausted / _pos_count, 3)
+            _now = utc_now()
+            _hold_days_list = []
+            for p in _positions.values():
+                _ed = p.get("entry_date", "")
+                if _ed and _ed != "synced":
+                    try:
+                        _edt = datetime.fromisoformat(_ed)
+                        if _edt.tzinfo is None:
+                            _edt = _edt.replace(tzinfo=timezone.utc)
+                        _hold_days_list.append((_now - _edt).total_seconds() / 86400)
+                    except (ValueError, TypeError):
+                        pass
+            ctx["entry_portfolio_avg_hold_days"] = round(
+                sum(_hold_days_list) / max(len(_hold_days_list), 1), 2
+            )
+            ctx["entry_portfolio_position_count"] = _pos_count
+            # v6.05: TP1 달성 비율 + 평균 최고PnL — C2 88% 적자 패턴 ML 학습
+            # tp1_ratio: 포트폴리오 수익 실현력 프록시 (0이면 전원 stuck)
+            # avg_high_pnl: 포지션들이 상방을 봤는지 여부 (0이면 진입 후 하락만)
+            _tp1_done = sum(1 for p in _positions.values() if p.get("tp_level", 0) >= 1)
+            ctx["entry_portfolio_tp1_ratio"] = round(_tp1_done / _pos_count, 3)
+            _high_pnls = [p.get("high_pnl", 0) for p in _positions.values()]
+            ctx["entry_portfolio_avg_high_pnl"] = round(
+                sum(_high_pnls) / max(len(_high_pnls), 1), 2
+            )
+            # v6.06: Portfolio MAE 피처 — F5 88% 적자 패턴 + Gemini 상관관계 blind spot
+            _low_pnls = [p.get("low_pnl", 0) for p in _positions.values()]
+            ctx["entry_portfolio_avg_low_pnl"] = round(
+                sum(_low_pnls) / max(len(_low_pnls), 1), 2
+            )
+            _deep_loss = sum(1 for lp in _low_pnls if lp < -10)
+            ctx["entry_portfolio_deep_loss_ratio"] = round(
+                _deep_loss / max(len(_low_pnls), 1), 3
+            )
+        else:
+            ctx["entry_portfolio_dca_exhausted_ratio"] = 0.0
+            ctx["entry_portfolio_avg_hold_days"] = 0.0
+            ctx["entry_portfolio_position_count"] = 0
+            ctx["entry_portfolio_tp1_ratio"] = 0.0
+            ctx["entry_portfolio_avg_high_pnl"] = 0.0
+            ctx["entry_portfolio_avg_low_pnl"] = 0.0
+            ctx["entry_portfolio_deep_loss_ratio"] = 0.0
+    else:
+        ctx["entry_portfolio_dca_exhausted_ratio"] = None
+        ctx["entry_portfolio_avg_hold_days"] = None
+        ctx["entry_portfolio_position_count"] = None
+        ctx["entry_portfolio_tp1_ratio"] = None
+        ctx["entry_portfolio_avg_high_pnl"] = None
+        ctx["entry_portfolio_avg_low_pnl"] = None
+        ctx["entry_portfolio_deep_loss_ratio"] = None
     return ctx
 
 
@@ -1663,6 +1806,21 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "entry_score_sr_pts": ec.get("entry_score_sr_pts", 0),
         "entry_score_vol_pts": ec.get("entry_score_vol_pts", 0),
         "entry_score_percentile_pts": ec.get("entry_score_percentile_pts", 0),
+        # v6.02: 시장 폭 + 슬롯 점유 webhook 전파 (ML — F2/Gemini 상관관계 학습)
+        "entry_market_breadth_pct": ec.get("entry_market_breadth_pct"),
+        "entry_slot_utilization": ec.get("entry_slot_utilization"),
+        # v6.03: 현금 비율 webhook 전파 (Codex/Gemini — DCA 여력 ML 학습)
+        "entry_cash_ratio": ec.get("entry_cash_ratio"),
+        # v6.04: 포트폴리오 건강도 webhook 전파 (F2 — entry-time 포트폴리오 상태)
+        "entry_portfolio_dca_exhausted_ratio": ec.get("entry_portfolio_dca_exhausted_ratio"),
+        "entry_portfolio_avg_hold_days": ec.get("entry_portfolio_avg_hold_days"),
+        "entry_portfolio_position_count": ec.get("entry_portfolio_position_count"),
+        # v6.05: TP1 달성률 + 평균 최고PnL webhook 동기화 (C2 — 포트폴리오 수익 이력)
+        "entry_portfolio_tp1_ratio": ec.get("entry_portfolio_tp1_ratio"),
+        "entry_portfolio_avg_high_pnl": ec.get("entry_portfolio_avg_high_pnl"),
+        # v6.06: Portfolio MAE webhook 동기화 (F5 — 88% 적자 + 상관관계 프록시)
+        "entry_portfolio_avg_low_pnl": ec.get("entry_portfolio_avg_low_pnl"),
+        "entry_portfolio_deep_loss_ratio": ec.get("entry_portfolio_deep_loss_ratio"),
         # [C] 청산 시점 — 현재 r에서
         "exit_rsi": round(r.get("rsi", 0), 1),
         "exit_adx": round(r.get("adx", 0), 1),
@@ -1711,6 +1869,8 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "trade_valid": 1 if pnl_pct > 0 else 0,  # v5.63: 메타 라벨링용 이진 타깃 (Codex 제안)
         # v5.65: Alpha PnL — 시장 수익률(BTC) 차감한 진입 품질
         "alpha_pnl": round(pnl_pct - btc_chg, 4) if isinstance(btc_chg, (int, float)) else pnl_pct,
+        # v6.03: BTC 상관도 프록시 — PnL÷BTC 변화율 (Codex/Gemini blind spot)
+        "btc_pnl_ratio": round(pnl_pct / btc_chg, 2) if isinstance(btc_chg, (int, float)) and abs(btc_chg) >= 0.1 else None,
         # [H] v5.54: 리스크 거리 피처 (ML 패턴 감지용)
         "sl_distance_pct": round(LOSS_CUT_PCT - abs(min(pnl_pct, 0)), 2),
         "position_age_days": round(hold_hours / 24, 2),
@@ -1928,7 +2088,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "6.01"
+        meta["version"] = "6.06"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -3448,7 +3608,7 @@ def main():
                         _send_trade_analysis_webhook(
                             ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                             "TP2", entry_p, pnl_pct,
-                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct),
+                            extra_data=_build_webhook_extra(pos, r, hold_hours, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct, portfolio=portfolio),
                             candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                         )
                 elif not can_trade:
@@ -3512,7 +3672,7 @@ def main():
                                 _send_trade_analysis_webhook(
                                     ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"],
                                     "PARTIAL_SL1", entry_p, pnl_pct,
-                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct),
+                                    extra_data=_build_webhook_extra(pos, r, _hold_h, _wh_regime, _wh_btc_chg, _wh_fg, _wh_rising, pnl_pct, portfolio=portfolio),
                                     candles_df=signal_data.get(ticker), entry_context=pos.get("entry_context"),
                                 )
                                 pos["sl_partial_done"] = True
