@@ -4045,7 +4045,12 @@ def main():
                         if order:
                             record_order(order_log, ticker, "BUY")
                             record_trade(ticker, "BUY", r["price"], add_krw / r["price"], add_krw, "DCA",
-                                        entry_context=capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg))
+                                        entry_context=capture_entry_context(
+                                            ticker, r, regime_info, btc_signal, _wh_fg,
+                                            market_breadth_pct=round(_wh_rising / max(len(results), 1) * 100, 1),
+                                            slot_utilization=current_positions / max(MAX_CONCURRENT_POSITIONS, 1),
+                                            cash_ratio=capital / max(total_capital, 1),
+                                            portfolio=portfolio))
                             old_vol = pos.get("volume", 0)
                             add_vol = add_krw / r["price"]
                             new_vol = old_vol + add_vol
@@ -4142,7 +4147,12 @@ def main():
                             order = execute_buy(ticker, buy_krw)
                             if order:
                                 record_order(order_log, ticker, "BUY")
-                                _ec = capture_entry_context(ticker, r, regime_info, btc_signal, _wh_fg)
+                                _ec = capture_entry_context(
+                                    ticker, r, regime_info, btc_signal, _wh_fg,
+                                    market_breadth_pct=round(_wh_rising / max(len(results), 1) * 100, 1),
+                                    slot_utilization=current_positions / max(MAX_CONCURRENT_POSITIONS, 1),
+                                    cash_ratio=capital / max(total_capital, 1),
+                                    portfolio=portfolio)
                                 # v6.00: ML entry score logging
                                 if _ml_result:
                                     _ec["ml_entry_score"] = _ml_result["score"]
