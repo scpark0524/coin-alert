@@ -1,18 +1,32 @@
 """
-🪙 Coin Alert System v6.06 — Upbit KRW 자동매매
+🪙 Coin Alert System v6.12 — Upbit KRW 자동매매
 
 
-v6.7: Quick Fix 적용 (2026-05-01)
-- [Quick Fix] ML Feature — capture_entry_context Portfolio MAE 피처 2종
-- [Quick Fix] ML Feature — build_trade_features JSONL 동기화
-- [Quick Fix] ML Feature — _build_webhook_extra webhook 동기화
-- [Quick Fix] 메타 버전 태그 6.05→6.06
-- [Quick Fix] 독스트링 버전 + 변경 로그 — F7 재발 방지
+
+
+
+
+
+v6.12: Quick Fix 적용 (2026-05-09)
+- [Quick Fix] main() TP1 실행 시 타임스탬프 + PnL 기록
+- [Quick Fix] _build_webhook_extra — TP1→exit gap 사전 계산
+- [Quick Fix] _build_webhook_extra — TP1 gap + net_pnl dict 항목
+- [Quick Fix] _send_trade_analysis_webhook — JSONL TP1 gap 전파
+- [Quick Fix] build_trade_features — TP1 gap JSONL 추출
+- [Quick Fix] build_trade_features — net_pnl_pct 순수익률 피처
+- [Quick Fix] sync_portfolio_with_upbit — tp1_timestamp/tp1_pnl 보존
+- [Quick Fix] 버전 태그 — meta version
+- [Quick Fix] 버전 태그 — 모듈 독스트링
+
+v6.7: Quick Fix 적용 (2026-05-07)
+- [Quick Fix] VOLATILE regime_bonus 명시 — ML quality_score blind spot 수정
+- [Quick Fix] ML quality_score 구성요소 분해 — JSONL feature importance 분석용
+- [Quick Fix] Meta version tag 6.09→6.10
 
 v6.06: F7 코드 실적용 + ML Portfolio MAE 피처 (2026-05-01)
-- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지 (KAT -20.5% 사건 교훈)
-- [유지] STUCK_CLEANUP_DAYS 60일 유지
-- [유지] MAX_CONCURRENT_POSITIONS 25 유지
+- [CRITICAL] CATASTROPHIC_STOP_PCT 30→20% — F7 v6.05 합의 실적용 (LOSS_CUT 30%과 10%p 간격)
+- [CRITICAL] STUCK_CLEANUP_DAYS 60→45일 — F7 슬롯 포화 해소 가속
+- [CRITICAL] MAX_CONCURRENT_POSITIONS 25→22 — F7 재포화 방지 + DCA 여력
 - [ML] entry_portfolio_avg_low_pnl — 포트폴리오 평균 MAE (F5 88% 적자 패턴 학습)
 - [ML] entry_portfolio_deep_loss_ratio — 심각 손실(-10%↓) 비율 (상관관계 리스크 프록시)
 - [ML] JSONL + webhook 스키마 동기화 (2종 피처)
@@ -25,9 +39,9 @@ v6.6: Quick Fix 적용 (2026-04-30)
 - [Quick Fix] 독스트링 버전 + 변경 로그 추가
 
 v6.05: 계층 방어 복원 + 슬롯 관리 + ML 포트폴리오 피처 (2026-04-30)
-- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지
-- [유지] STUCK_CLEANUP_DAYS 60일 유지
-- [유지] MAX_CONCURRENT_POSITIONS 25 유지
+- [CRITICAL] CATASTROPHIC_STOP_PCT 30→20% — C4 계층 방어 복원 (LOSS_CUT 30%과 10%p 간격)
+- [CRITICAL] STUCK_CLEANUP_DAYS 60→45일 — C1 슬롯 25/25 포화 해소 가속
+- [CRITICAL] MAX_CONCURRENT_POSITIONS 25→22 — C1/C9 재포화 방지 (DCA 유지)
 - [ML] entry_portfolio_tp1_ratio — 진입 시점 TP1 달성 비율 (포트폴리오 수익 실현력 학습)
 - [ML] entry_portfolio_avg_high_pnl — 진입 시점 평균 최고PnL (상방 도달 이력 학습)
 - [ML] JSONL + webhook 스키마 동기화 (2종 피처)
@@ -74,7 +88,7 @@ v6.00: Quick Fix 적용 (2026-04-19)
 - [Quick Fix] 독스트링 v5.99 버전 업데이트 (버그 수정)
 
 v5.99: F1/F2 구조 개선 + ML 주말 피처 (2026-04-19)
-- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지
+- [CRITICAL] CATASTROPHIC_STOP_PCT 30→20% — 계층 방어 복원 (F1 전원합의)
 - [매매] STUCK_CLEANUP_DAYS 90→60일 — 슬롯 포화 25/25 완화 (F2)
 - [ML] is_weekend 피처 — webhook + JSONL 동기화 (주말 유동성 패턴 학습)
 - [ML] exit_day_of_week/exit_hour_kst — JSONL 스키마 동기화
@@ -219,7 +233,7 @@ v5.63: ML 라벨 품질 개선 (2026-03-31)
 v5.62: Quick Fix 적용 (2026-03-31)
 - [Quick Fix] ML_SCORE_WEIGHTS — time_efficiency 가중치 하향 (Priority 1)
 - [Quick Fix] Webhook ML 파생 피처 3종 추가 (Priority 1)
-- [유지] CATASTROPHIC_STOP_PCT 30% 유지 — 조기손절 방지 (KAT 사건)
+- [Quick Fix] CATASTROPHIC_STOP_PCT 30→20% — 계층 방어 복원 (Priority 3, F1 전원합의)
 - [Quick Fix] 스테이블코인 자동 제외 필터 (Priority 4, F5 전원합의)
 
 v5.60: Quick Fix 적용 (2026-03-30)
@@ -1302,7 +1316,7 @@ def compute_trade_quality_score(pnl_pct, holding_hours, volatility, regime, max_
         time_score = max(min(time_eff / 3.0, 1.0), -1.0)
         risk_adj = pnl_pct / max(volatility, 0.1)
         risk_score = max(min(risk_adj / 3.0, 1.0), -1.0)
-        regime_bonus = {"BULL": 0.3, "MILD_BULL": 0.15, "SIDEWAYS": 0.0, "MILD_BEAR": -0.1, "BEAR": -0.2}
+        regime_bonus = {"BULL": 0.3, "MILD_BULL": 0.15, "SIDEWAYS": 0.0, "MILD_BEAR": -0.1, "BEAR": -0.2, "VOLATILE": -0.15}
         regime_score = max(min(regime_bonus.get(regime, 0.0) + pnl_score * 0.5, 1.0), -1.0)
         # v5.63: 경로 안정성 페널티 — 보유 중 최고 PnL 대비 회수율
         # max_pnl=15%, pnl=3% → drawdown=12%p → penalty=0.18
@@ -1348,13 +1362,15 @@ def _classify_trade(pnl_pct, holding_hours):
 
 def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
                          holding_hours, regime, entry_score, candles_df=None,
-                         entry_context=None, max_pnl=None, btc_change_pct=None):
+                         entry_context=None, max_pnl=None, btc_change_pct=None,
+                         exit_reason=None):
     """매매 피처 추출 + JSONL 로깅 — ML 학습 데이터 수집.
 
     entry_context: capture_entry_context()가 매수 시 캡처한 스냅샷.
     candles_df: 청산 시점 기술적 지표 추출용.
     max_pnl: 보유 중 최고 PnL% (v5.63 — 경로 안정성 평가용).
     btc_change_pct: BTC 변화율% (v5.65 — Alpha PnL 계산용, None이면 entry_context 폴백).
+    exit_reason: 청산 사유 (v6.10 — ML 피드백 루프 해소, Gemini/Codex 합의).
     """
     features = {
         "timestamp": utc_now().isoformat(),
@@ -1363,6 +1379,7 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         "pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else None,
         "holding_hours": round(holding_hours, 2) if holding_hours is not None else None,
         "regime": regime, "entry_score": entry_score,
+        "exit_reason": exit_reason,
     }
     # v5.65: Alpha PnL 피처 (BTC beta 차감 — Gemini/Codex 합의)
     _btc_chg = btc_change_pct if btc_change_pct is not None else (
@@ -1370,6 +1387,8 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
     )
     features["btc_change_pct"] = _btc_chg
     features["alpha_pnl"] = round((pnl_pct or 0) - _btc_chg, 4) if isinstance(_btc_chg, (int, float)) else pnl_pct
+    # v6.11: 순수익률 — round-trip 비용 차감 (Gemini — Gross vs Net PnL 구분)
+    features["net_pnl_pct"] = round((pnl_pct or 0) - TOTAL_COST_BPS / 100, 4) if pnl_pct is not None else None
     # v6.03: BTC 상관도 프록시 — PnL÷BTC 변화율 (Codex/Gemini blind spot — 상관관계 리스크)
     # |BTC chg| < 0.1%이면 노이즈 → None. ratio>2=BTC 2배 레버리지 상당, ratio<0=역상관
     features["btc_pnl_ratio"] = round((pnl_pct or 0) / _btc_chg, 2) if isinstance(_btc_chg, (int, float)) and abs(_btc_chg) >= 0.1 else None
@@ -1447,6 +1466,19 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
         # v6.06: Portfolio MAE JSONL 동기화 (F5 — 88% 적자 + Gemini 상관관계 프록시)
         features["entry_portfolio_avg_low_pnl"] = entry_context.get("entry_portfolio_avg_low_pnl")
         features["entry_portfolio_deep_loss_ratio"] = entry_context.get("entry_portfolio_deep_loss_ratio")
+        # v6.07: Dead money JSONL 동기화 (C4/C5 — DCA 고갈+TP1 미도달 슬롯 패턴)
+        features["entry_portfolio_dead_money_count"] = entry_context.get("entry_portfolio_dead_money_count")
+        features["entry_portfolio_dead_money_ratio"] = entry_context.get("entry_portfolio_dead_money_ratio")
+        # v6.08: Portfolio PnL 분산 JSONL 동기화 (Gemini — 상관관계 프록시)
+        features["entry_portfolio_high_pnl_std"] = entry_context.get("entry_portfolio_high_pnl_std")
+        features["entry_portfolio_low_pnl_std"] = entry_context.get("entry_portfolio_low_pnl_std")
+        features["entry_portfolio_hold_days_std"] = entry_context.get("entry_portfolio_hold_days_std")
+        # v6.09: TP1 도달 거리 평균 JSONL 동기화 (Dead money 패턴 ML 학습)
+        features["entry_portfolio_avg_tp1_gap"] = entry_context.get("entry_portfolio_avg_tp1_gap")
+        # v6.11: TP1→exit gap JSONL 추출 (F2 — exit-time 피처, label leakage 없음)
+        features["hours_since_tp1"] = entry_context.get("hours_since_tp1")
+        features["pnl_at_tp1"] = entry_context.get("pnl_at_tp1")
+        features["pnl_gain_since_tp1"] = entry_context.get("pnl_gain_since_tp1")
         # v6.00: ML entry score — JSONL accumulation for model feedback loop
         features["ml_entry_score"] = entry_context.get("ml_entry_score")
         features["ml_entry_label"] = entry_context.get("ml_entry_label")
@@ -1477,6 +1509,16 @@ def build_trade_features(ticker, action, entry_price, exit_price, pnl_pct,
                 max_pnl=max_pnl,
                 btc_change_pct=_btc_chg,
             )
+            # v6.10: ML quality score 분해 — 개별 구성요소 기록 (Codex 피드백)
+            # feature importance 분석 시 어떤 요소가 score를 지배하는지 사후 추적 가능
+            _qs_alpha = (pnl_pct or 0) - _btc_chg if isinstance(_btc_chg, (int, float)) else (pnl_pct or 0)
+            features["qs_pnl_score"] = round(max(min(_qs_alpha / 10.0, 1.0), -1.0), 4)
+            _qs_time = (pnl_pct or 0) / max(np.log2(max((holding_hours or 0), 1) + 1), 0.5)
+            features["qs_time_score"] = round(max(min(_qs_time / 3.0, 1.0), -1.0), 4)
+            _qs_risk = (pnl_pct or 0) / max(vol, 0.1)
+            features["qs_risk_score"] = round(max(min(_qs_risk / 3.0, 1.0), -1.0), 4)
+            _qs_path = min(0.3, max(0.0, (max_pnl or 0) - (pnl_pct or 0)) * 0.015) if (max_pnl is not None and (max_pnl or 0) > 0) else 0.0
+            features["qs_path_penalty"] = round(_qs_path, 4)
         except Exception:
             pass
     # v5.78: JSONL 파생 피처 — webhook 스키마 동기화 (6종 추가)
@@ -1630,6 +1672,36 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
             ctx["entry_portfolio_deep_loss_ratio"] = round(
                 _deep_loss / max(len(_low_pnls), 1), 3
             )
+            # v6.07: Dead money 피처 — C4(96% 손실) + C5(DCA 고갈 6종목) 패턴 ML 학습
+            # dead_money = DCA 고갈(평단 인하 불가) + TP1 미도달(수익 실현 불가) = 자본 묶임
+            _dead_money = sum(
+                1 for p in _positions.values()
+                if p.get("dca_count", 0) >= DCA_MAX_ADDS and p.get("tp_level", 0) < 1
+            )
+            ctx["entry_portfolio_dead_money_count"] = _dead_money
+            ctx["entry_portfolio_dead_money_ratio"] = round(
+                _dead_money / _pos_count, 3
+            )
+            # v6.08: Portfolio PnL 분산도 — Gemini BS 상관관계 프록시 (25종목=BTC 레버리지 감지)
+            # high_pnl_std 낮음 → 모든 포지션 유사 MFE → 높은 상관 → 위험
+            # low_pnl_std 낮음 → 전원 동시 하락 → 시스템 리스크
+            # hold_days_std 낮음 → 동일 시점 진입 → 빈티지 집중 (Codex BS)
+            ctx["entry_portfolio_high_pnl_std"] = round(float(np.std(_high_pnls)), 2) if len(_high_pnls) >= 2 else 0.0
+            ctx["entry_portfolio_low_pnl_std"] = round(float(np.std(_low_pnls)), 2) if len(_low_pnls) >= 2 else 0.0
+            ctx["entry_portfolio_hold_days_std"] = round(float(np.std(_hold_days_list)), 2) if len(_hold_days_list) >= 2 else 0.0
+            # v6.09: TP1 도달 거리 평균 — Dead money 패턴 ML 학습
+            # avg_tp1_gap 높음 → 포트폴리오 TP1 미도달 다수 → 자본 묶임 패턴
+            # FF +21.8%, TRUMP +26.1% 필요 = gap > 20 → 구조적 dead money 감지
+            # synced 포지션: entry_context 없음 → regime 폴백 "SIDEWAYS" (tp1=3.0%)
+            _tp1_gaps = []
+            for _p in _positions.values():
+                _p_regime = (_p.get("entry_context") or {}).get("entry_regime", "SIDEWAYS")
+                _p_tp1 = get_regime_scoring(_p_regime).get("tp1_pct", 3.0)
+                _p_high = _p.get("high_pnl", 0)
+                _tp1_gaps.append(_p_tp1 - _p_high)
+            ctx["entry_portfolio_avg_tp1_gap"] = round(
+                sum(_tp1_gaps) / max(len(_tp1_gaps), 1), 2
+            )
         else:
             ctx["entry_portfolio_dca_exhausted_ratio"] = 0.0
             ctx["entry_portfolio_avg_hold_days"] = 0.0
@@ -1638,6 +1710,12 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
             ctx["entry_portfolio_avg_high_pnl"] = 0.0
             ctx["entry_portfolio_avg_low_pnl"] = 0.0
             ctx["entry_portfolio_deep_loss_ratio"] = 0.0
+            ctx["entry_portfolio_dead_money_count"] = 0
+            ctx["entry_portfolio_dead_money_ratio"] = 0.0
+            ctx["entry_portfolio_high_pnl_std"] = 0.0
+            ctx["entry_portfolio_low_pnl_std"] = 0.0
+            ctx["entry_portfolio_hold_days_std"] = 0.0
+            ctx["entry_portfolio_avg_tp1_gap"] = 0.0
     else:
         ctx["entry_portfolio_dca_exhausted_ratio"] = None
         ctx["entry_portfolio_avg_hold_days"] = None
@@ -1646,6 +1724,12 @@ def capture_entry_context(ticker, result, regime_info, btc_signal, fear_greed_sc
         ctx["entry_portfolio_avg_high_pnl"] = None
         ctx["entry_portfolio_avg_low_pnl"] = None
         ctx["entry_portfolio_deep_loss_ratio"] = None
+        ctx["entry_portfolio_dead_money_count"] = None
+        ctx["entry_portfolio_dead_money_ratio"] = None
+        ctx["entry_portfolio_high_pnl_std"] = None
+        ctx["entry_portfolio_low_pnl_std"] = None
+        ctx["entry_portfolio_hold_days_std"] = None
+        ctx["entry_portfolio_avg_tp1_gap"] = None
     return ctx
 
 
@@ -1691,6 +1775,10 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
             _ec_for_jsonl["portfolio_dca_exhausted_count"] = extra_data.get("portfolio_dca_exhausted_count")
             _ec_for_jsonl["portfolio_tp1_done_ratio"] = extra_data.get("portfolio_tp1_done_ratio")
             _ec_for_jsonl["portfolio_avg_hold_days"] = extra_data.get("portfolio_avg_hold_days")
+            # v6.11: TP1→exit gap JSONL 전파 (F2 — hours_since_tp1/pnl_at_tp1/pnl_gain_since_tp1)
+            _ec_for_jsonl["hours_since_tp1"] = extra_data.get("hours_since_tp1")
+            _ec_for_jsonl["pnl_at_tp1"] = extra_data.get("pnl_at_tp1")
+            _ec_for_jsonl["pnl_gain_since_tp1"] = extra_data.get("pnl_gain_since_tp1")
         build_trade_features(
             ticker=ticker, action=side, entry_price=entry_price, exit_price=price,
             pnl_pct=pnl_pct,
@@ -1701,6 +1789,7 @@ def _send_trade_analysis_webhook(ticker, side, price, volume, krw_amount, reason
             entry_context=_ec_for_jsonl,
             max_pnl=(extra_data or {}).get("max_pnl_during_hold"),
             btc_change_pct=(extra_data or {}).get("btc_change_pct"),
+            exit_reason=reason,
         )
     except Exception as e:
         print(f"   ⚠️ {ticker.replace('KRW-','')} JSONL 로깅 실패: {e}")
@@ -1790,6 +1879,21 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
     ec = pos.get("entry_context", {}) if isinstance(pos, dict) else {}
     price = r.get("price", 0)
     atr = r.get("atr", 0)
+    # v6.11: TP1→exit gap 사전 계산 (F2 — exit-time 피처, label leakage 없음)
+    _hours_since_tp1 = None
+    _pnl_at_tp1 = None
+    _pnl_gain_since_tp1 = None
+    if isinstance(pos, dict) and pos.get("tp1_timestamp"):
+        try:
+            _tp1_dt = datetime.fromisoformat(pos["tp1_timestamp"])
+            if _tp1_dt.tzinfo is None:
+                _tp1_dt = _tp1_dt.replace(tzinfo=timezone.utc)
+            _hours_since_tp1 = round((utc_now() - _tp1_dt).total_seconds() / 3600, 2)
+        except (ValueError, TypeError):
+            pass
+        _pnl_at_tp1 = pos.get("tp1_pnl")
+        if isinstance(_pnl_at_tp1, (int, float)):
+            _pnl_gain_since_tp1 = round(pnl_pct - _pnl_at_tp1, 2)
     return {
         # [B] 진입 시점 — entry_context에서 (없으면 현재값 폴백)
         "entry_rsi": ec.get("entry_rsi", round(r.get("rsi", 0), 1)),
@@ -1821,6 +1925,15 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         # v6.06: Portfolio MAE webhook 동기화 (F5 — 88% 적자 + 상관관계 프록시)
         "entry_portfolio_avg_low_pnl": ec.get("entry_portfolio_avg_low_pnl"),
         "entry_portfolio_deep_loss_ratio": ec.get("entry_portfolio_deep_loss_ratio"),
+        # v6.07: Dead money webhook 동기화 (C4/C5 — DCA 고갈+TP1 미도달 패턴)
+        "entry_portfolio_dead_money_count": ec.get("entry_portfolio_dead_money_count"),
+        "entry_portfolio_dead_money_ratio": ec.get("entry_portfolio_dead_money_ratio"),
+        # v6.08: Portfolio PnL 분산 webhook 동기화 (Gemini — 상관관계 프록시)
+        "entry_portfolio_high_pnl_std": ec.get("entry_portfolio_high_pnl_std"),
+        "entry_portfolio_low_pnl_std": ec.get("entry_portfolio_low_pnl_std"),
+        "entry_portfolio_hold_days_std": ec.get("entry_portfolio_hold_days_std"),
+        # v6.09: TP1 도달 거리 평균 webhook 동기화 (Dead money 패턴 ML)
+        "entry_portfolio_avg_tp1_gap": ec.get("entry_portfolio_avg_tp1_gap"),
         # [C] 청산 시점 — 현재 r에서
         "exit_rsi": round(r.get("rsi", 0), 1),
         "exit_adx": round(r.get("adx", 0), 1),
@@ -1912,6 +2025,12 @@ def _build_webhook_extra(pos, r, hold_hours, exit_regime, btc_chg, fear_greed_sc
         "distance_to_tp1_pct": round(get_regime_scoring(ec.get("entry_regime", exit_regime)).get("tp1_pct", 3.0) - pnl_pct, 2),
         # v5.97: 체류 페널티 — quality_score 감점 원인 투명화 (F5 webhook 동기화)
         "stuck_penalty": round(min(MAX_STUCK_PENALTY, max(0, hold_hours - STUCK_HOURS_THRESHOLD) / 24 * STUCK_PENALTY_PER_DAY), 4) if hold_hours > STUCK_HOURS_THRESHOLD else 0.0,
+        # v6.11: TP1→exit gap (F2 — 핵심 수익 드라이버 패턴 ML 학습, exit-time 피처)
+        "hours_since_tp1": _hours_since_tp1,
+        "pnl_at_tp1": _pnl_at_tp1,
+        "pnl_gain_since_tp1": _pnl_gain_since_tp1,
+        # v6.11: 순수익률 (Gemini — Gross vs Net PnL 구분, round-trip 비용 차감)
+        "net_pnl_pct": round(pnl_pct - TOTAL_COST_BPS / 100, 4),
         # [M] v5.90: Portfolio ML context (F2+F4 — 포트폴리오 상태 학습)
         **_calc_portfolio_ml_features(portfolio),
     }
@@ -2008,7 +2127,7 @@ def sync_portfolio_with_upbit(portfolio):
         # high_watermark, trailing_stop 보존
         for t in actual:
             if t in local:
-                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl", "low_pnl", "sl_partial_done", "entry_context"):
+                for key in ("entry_date", "partial_taken", "dca_count", "full_position_krw", "tp_level", "high_pnl", "low_pnl", "sl_partial_done", "entry_context", "tp1_timestamp", "tp1_pnl"):
                     if key in local[t]:
                         actual[t][key] = local[t][key]
             if "dca_count" not in actual[t]:
@@ -2088,7 +2207,7 @@ def check_circuit_breaker(portfolio, capital, results, mutate_meta=True):
     daily_dd = (daily_start - current_value) / daily_start if daily_start > 0 else 0
 
     if mutate_meta:
-        meta["version"] = "6.06"
+        meta["version"] = "6.11"
         meta["last_value"] = round(current_value, 0)
         meta["last_check"] = utc_now().strftime("%Y-%m-%d %H:%M")
         meta["daily_dd"] = round(daily_dd, 4)
@@ -3564,6 +3683,10 @@ def main():
                         record_trade(ticker, "PARTIAL_SELL", r["price"], sell_vol, sell_vol * r["price"], "TP1", entry_p, pnl_pct)
                         pos["tp_level"] = 1
                         pos["partial_taken"] = True  # 하위 호환
+                        # v6.11: TP1 실행 메타데이터 (F2 — TP1→SIGNAL gap 평균 2h45m, +1.68%p ML 학습)
+                        # pnl_pct는 market price proxy (체결가 아닌 현재가 기준, ML 수준 허용)
+                        pos["tp1_timestamp"] = utc_now().isoformat()
+                        pos["tp1_pnl"] = round(pnl_pct, 2)
                         pos["volume"] = vol - sell_vol
                         signal_fired = True
                         sold_value = sell_vol * r["price"]

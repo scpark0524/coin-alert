@@ -74,7 +74,7 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - 데이터: `portfolio.json`, `order_log.json` (gitignore)
 - stock-alert v7.6 로직 기반으로 코인 특성에 맞게 조정
 
-## 현재 상태 (v6.06)
+## 현재 상태 (v6.12)
 - 전종목 자동 스캔 (~241종목, 투자유의/위험 종목 자동 제외)
 - 신호 생성: 1시간봉 450개 (~19일)
 - 백테스트: 일봉 200일 (Walk-Forward, train 150 + test 50)
@@ -96,7 +96,7 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - 의존성: pyupbit, pandas, numpy, requests, matplotlib, mplfinance
 - 환경변수: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, UPBIT_ACCESS_KEY, UPBIT_SECRET_KEY, INITIAL_CAPITAL
 
-## 주요 파라미터 (v6.06)
+## 주요 파라미터 (v6.12)
 - 분할 익절: TP1 레짐별(BEAR 2%/SIDE 3%/BULL 4%) 50% → TP2 +7%(60%) → TP3 +10%(전량)
 - 손절: CATASTROPHIC -30%(상폐 방어) 외 분할SL 비활성 (v5.53 전략 전환)
 - DCA: 진입가 대비 -10% 하락 시 잔여 추가매수, 최대 2회
@@ -126,3 +126,6 @@ ORCHESTRATOR_URL — 오케스트레이터 VM 주소 (http://146.56.119.175:8000
 - v5.99: STUCK_CLEANUP 90→60일, is_weekend/exit시간 ML 피처
 - v6.00: 독스트링 + 메타 버전 태그 정리
 - v6.01: ML 피처 확장 — 스코어 팩터 분해(6종) + btc_volatility_24h + ml_regime_group + entry_is_weekend + exit_regime_group + 시간대 JSONL 복원
+- v6.07~v6.09: ML 피처 확장 — dead_money(DCA고갈+TP1미도달), PnL 분산도(3종), TP1 도달 거리 평균
+- v6.10: quality_score 분해(4종 qs_*), exit_reason ML 피처, VOLATILE regime_bonus 추가
+- v6.11~v6.12: TP1→exit gap 피처(3종), net_pnl_pct 순수익률, sync_portfolio tp1 메타데이터 보존
