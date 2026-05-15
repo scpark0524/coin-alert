@@ -413,9 +413,9 @@ coin-alert/
 ├── README.md
 └── .gitignore
 ```
-
+  
 ## 실행 환경
 
-- **트레이딩 VM**: Oracle Cloud (158.179.171.23) — cron으로 매매 실행
-- **오케스트레이터 VM**: Oracle Cloud (146.56.119.175) — 대시보드/데일리루틴/ML API
+- **트레이딩 VM**: Oracle Cloud  — cron으로 매매 실행
+- **오케스트레이터 VM**: Oracle Cloud — 대시보드/데일리루틴/ML API
 - **webhook**: 매도 시 트레이딩VM → 오케스트레이터VM (ORCHESTRATOR_URL 환경변수)
