@@ -2,42 +2,11 @@
 
 평균회귀 기반 자동매매 시스템. 저점 분할매수 → 익절 반복 → 상폐 방어(-30%)만 손절.
 
-## Live Performance (2026.03.12 ~ 05.15)
+## Live Performance (2026.03.12 ~)
 
 > 초기 자본금 500만원, Oracle Cloud VM에서 24/7 무인 운영
 
-| 지표 | 값 |
-|------|-----|
-| 누적 실현수익 | **+498,374원 (+10.0%)** |
-| 승률 | **83.4%** (322승 / 386건) |
-| 수익일 비율 | **86%** (48일 / 56 매매일) |
-| MDD | **-7.77%** (-389,945원) |
-| 총 거래 | 665건 (매수 279 / 매도 386) |
-| 자본 회전율 | 10.0x |
-| 일평균 실현수익 | +8,900원 |
-| BEP 도달 | 33일 (4/14) |
-
-### 매도 사유별 성과
-
-| 사유 | 건수 | 평균 수익률 | 승률 |
-|------|------|-----------|------|
-| TP1 (1차 익절) | 148건 | +4.0% | 100% |
-| SIGNAL (시그널 매도) | 146건 | +4.6% | 100% |
-| STOP_LOSS | 30건 | -5.7% | 0% |
-| PARTIAL_SL1 | 20건 | -4.7% | 0% |
-| TP2 (2차 익절) | 12건 | +11.1% | 100% |
-| TRAILING_STOP | 3건 | +4.5% | 100% |
-| CATASTROPHIC_STOP | 3건 | -26.9% | 0% |
-
-### 건별 수익률 분포
-
-| 지표 | 값 |
-|------|-----|
-| 평균 수익률 | +2.96% |
-| 수익 거래 평균 | +4.65% |
-| 손실 거래 평균 | -5.90% |
-| 최대 수익 (건별) | +19.66% |
-| 최대 손실 (건별) | -30.17% |
+![cumulative returns](docs/cumulative_returns.png)
 
 ---
 
@@ -159,51 +128,186 @@ BULL         +4%     ≥ 80     ≤ 15%       ≥ 5
 
 ---
 
-## ML 매매 분석
+## ML 매매 분석 (v5.52 ~ v6.12)
 
-매도 체결 시마다 60+컬럼 피처를 축적하여, 진입 시점에 "이 거래가 수익/손실이 될 확률"을 예측하는 것이 목표.
+### 목표
+매도 체결 시마다 **"왜 이 거래가 수익/손실이었는가?"**를 ML이 학습할 수 있는 피처를 축적한다.
+궁극적으로 **진입 시점에 "이 거래가 WIN/STUCK_LOSS가 될 확률"을 예측**하여 진입 품질을 높이는 것이 목표.
 
 ### 데이터 흐름
 
 ```
-[매수] capture_entry_context()
-         → RSI, ADX, BB위치, 변동성, 레짐, 공포탐욕 등 스냅샷 저장
+[매수]  capture_entry_context() → 매수 시점 스냅샷을 portfolio에 저장
+           (RSI, ADX, BB위치, 변동성, 시장레짐, 공포탐욕 등)
 
-[매도] build_trade_features()
-         → 진입 피처 + 청산 피처 + 시장 컨텍스트 합산
-         → webhook → 오케스트레이터 DB
-         → 로컬 JSONL 백업
+[매도]  _build_webhook_extra() → 청산 시점 피처 + 진입 피처 합산
+           → POST /api/v1/projects/coin-alert/trade-analysis
+           → 오케스트레이터 trade_analyses DB (43컬럼)
+        build_trade_features() → 동일 데이터 로컬 JSONL 백업
 ```
 
-### 피처 카테고리 (60+컬럼)
+### 피처 상세 설명
 
-| 카테고리 | 컬럼 수 | 내용 |
-|----------|---------|------|
-| 거래 기본 | 8 | ticker, side, price, volume, pnl_pct 등 |
-| 진입 기술지표 | 7 | entry_rsi, entry_adx, entry_bb_position 등 |
-| 청산 기술지표 | 3 | exit_rsi, exit_adx, exit_atr_pct |
-| 시장 컨텍스트 | 5 | regime, btc_change_pct, fear_greed 등 |
-| 포지션 메타 | 5 | hold_hours, dca_count, tp_level, MFE 등 |
-| 시간 | 5 | entry/exit 시각, 요일, 야간 여부 |
-| 스코어 분해 | 6 | 앙상블 하위 전략별 점수 |
-| 포트폴리오 상태 | 8 | 슬롯 점유율, DCA 고갈률, 평균 보유일 등 |
-| 라벨 | 12 | quality_score, trade_class, MFE 포착률 등 |
-| 리스크 파생 | 4 | 손절 거리, 보유 중 드로다운, 레짐 변화 등 |
+#### [A] 거래 기본 (8개) — 무엇을 얼마에 사고팔았는가
 
-### quality_score
+| 컬럼 | 설명 |
+|------|------|
+| `ticker` | 종목 (예: KRW-BTC) |
+| `side` | SELL 또는 PARTIAL_SELL |
+| `price` | 매도 체결가 |
+| `volume` | 매도 수량 |
+| `krw_amount` | 매도 금액 (원화) |
+| `reason` | 매도 사유 — TP1/TP2/TP3/TRAILING/RSI_SELL/SIGNAL/CATASTROPHIC_STOP/BREAKEVEN_STOP/STUCK_CLEANUP 등 |
+| `entry_price` | 매수 평균단가 (DCA 시 가중평균) |
+| `pnl_pct` | 수익률% = (매도가/진입가 - 1) × 100 |
+
+#### [B] 진입 시점 기술지표 (7개) — 매수할 때 시장 상태가 어땠는가
+
+매수 시점의 `capture_entry_context()` 스냅샷. **ML이 "어떤 조건에서 진입하면 수익이 나는가"를 학습하는 핵심 입력.**
+
+| 컬럼 | 설명 | 좋은 진입 예시 |
+|------|------|--------------|
+| `entry_rsi` | 매수 시 RSI (0~100) | RSI ≤ 30 (과매도) |
+| `entry_adx` | 매수 시 ADX (추세 강도) | ADX < 25 (비추세 = 평균회귀 유리) |
+| `entry_bb_position` | BB 밴드 내 위치 (-1~+1, 0=중앙) | < -0.5 (하단 근접) |
+| `entry_atr_pct` | 매수 시 ATR% (변동성) | 낮을수록 안정 |
+| `entry_volume_ratio` | 24h 거래량 / 20일 평균 | > 1.5 (거래량 급증 = 관심 집중) |
+| `entry_price_percentile` | 450봉 중 현재가 백분위 (0=최저) | < 10 (역사적 저점 근접) |
+| `entry_score` | 앙상블 스코어 (3전략 합산) | 높을수록 강한 매수 신호 |
+
+#### [C] 청산 시점 기술지표 (3개) — 팔 때 시장 상태
+
+| 컬럼 | 설명 |
+|------|------|
+| `exit_rsi` | 매도 시 RSI — 높으면 과매수 구간에서 익절 |
+| `exit_adx` | 매도 시 ADX — 추세 강도 |
+| `exit_atr_pct` | 매도 시 ATR% — 변동성. quality_score 계산에 사용 |
+
+#### [D] 시장 컨텍스트 (5개) — 전체 시장이 어땠는가
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `entry_regime` | 매수 시 BTC 레짐 (BULL/MILD_BULL/SIDEWAYS/MILD_BEAR/BEAR) | 레짐별 승률 차이 학습 |
+| `exit_regime` | 매도 시 레짐 | 레짐 변화가 수익에 미치는 영향 |
+| `btc_change_pct` | BTC 24h 변화율% | 시장 전체 방향성 |
+| `fear_greed` | 공포탐욕지수 (0=극단공포, 100=극단탐욕) | 극단공포 매수 → 고승률 가설 검증 |
+| `market_rising` | 상승 종목 수 (242종목 중) | 시장 전반 분위기 |
+
+#### [E] 포지션 메타 (5개) — 어떻게 보유했는가
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `hold_hours` | 보유 시간 | 장기 보유 vs 단기 익절 패턴 |
+| `dca_count` | DCA 횟수 (0/1/2) | DCA 후 승률 변화 분석 |
+| `tp_level` | 익절 단계 (0=미익절, 1=TP1, 2=TP2) | 분할익절 효과 측정 |
+| `max_pnl_during_hold` | 보유 중 최고 PnL% (MFE) | 최고점 대비 얼마나 회수했는지 |
+| `sl_partial_done` | 분할손절 1단계 실행 여부 | 손절 이력이 최종 결과에 미치는 영향 |
+
+#### [F] 시간 (5개) — 언제 샀고 팔았는가
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `entry_hour_kst` | 매수 시각 (KST 0~23) | 시간대별 승률 차이 |
+| `exit_hour_kst` | 매도 시각 | - |
+| `day_of_week` | 요일 (0=월 ~ 6=일) | 주말/평일 패턴 |
+| `entry_is_night` | 야간 매수 여부 (23~06시 = 1) | v5.67: 83% 야간 매수 편중 발견 → 야간/주간 품질 차이 분석 |
+| `exit_is_night` | 야간 매도 여부 | - |
+
+#### [G] 스코어 팩터 분해 (6개) — 앙상블 하위 전략별 점수
+
+| 컬럼 | 설명 |
+|------|------|
+| `score_mean_reversion_pts` | 평균회귀 전략 기여 점수 |
+| `score_trend_pts` | 추세추종 전략 기여 점수 |
+| `score_momentum_pred_pts` | 모멘텀예측 전략 기여 점수 |
+| `score_support_pts` | 지지선 근접 보너스 점수 |
+| `score_volume_pts` | 거래량 돌파 보너스 점수 |
+| `score_rsi_pts` | RSI 과매도 보너스 점수 |
+
+#### [H] 포트폴리오 상태 (8개) — 매수 시점 포트폴리오 건강도
+
+| 컬럼 | 설명 | ML 활용 |
+|------|------|---------|
+| `entry_market_breadth_pct` | 시장 상승 종목 비율 | 알트 상관관계 학습 |
+| `entry_slot_utilization` | 슬롯 점유율 (보유종목/최대25) | 슬롯 포화 시 진입 품질 저하 여부 |
+| `entry_cash_ratio` | 현금 비율 | 여유 자금과 성과 상관관계 |
+| `entry_portfolio_dca_exhausted_ratio` | DCA 고갈 비율 | 포트폴리오 전반 하락 압박 정도 |
+| `entry_portfolio_avg_hold_days` | 평균 보유일 | 전체 포트폴리오 회전 속도 |
+| `entry_portfolio_position_count` | 보유 종목 수 | 분산 정도 |
+| `entry_portfolio_tp1_ratio` | TP1 달성 비율 | 포트폴리오 건강도 프록시 |
+| `entry_portfolio_avg_high_pnl` | 평균 최고 PnL | 88% 적자 패턴 학습 |
+
+#### [I] 라벨 (12개) — ML 학습 타깃 (이 거래가 좋았는가?)
+
+| 컬럼 | 범위 | 설명 |
+|------|------|------|
+| `quality_score` | -1.0 ~ +1.0 | **핵심 라벨.** Alpha PnL + 시간효율 + 위험조정 + 레짐적합도 - 경로페널티의 가중합 |
+| `alpha_pnl` | % | PnL - BTC변화율. 시장 상승분(beta)을 빼고 **순수 진입 품질(alpha)만** 측정 |
+| `trade_class` | WIN/NEUTRAL/STUCK_LOSS | 3-class 분류 라벨. 소표본(~60건)에서 regression보다 견고 |
+| `trade_valid` | 0/1 | PnL > 0이면 1. 메타 라벨링용 이진 타깃 |
+| `mfe_capture_ratio` | -2.0 ~ 1.0 | MFE 포착률 = 최종PnL / 보유중최고PnL. **1.0=최고점 청산, 0.0=수익 전량 반납** |
+| `tp1_reached` | 0/1 | 보유 중 레짐별 TP1에 도달했는지. "TP1 도달하는 거래"의 진입 패턴 학습 |
+| `tp2_reached` | 0/1 | 보유 중 TP2(8%)에 도달했는지. TP2 미도달 인과분석 |
+| `distance_to_tp2_pct` | % | TP2까지 남은 거리 = 8% - PnL |
+| `mfe_to_tp1_ratio` | float | MFE / 레짐TP1. 1.0이면 TP1 정확히 도달, >1이면 초과 |
+| `is_stuck` | 0/1 | 7일+ 보유 & 손실 상태. stuck 포지션 사전 감지용 |
+| `loss_band` | 0~4 | 손실 구간: 0=수익, 1=-2%, 2=-5%, 3=-10%, 4=-10%+ |
+| `rsi_delta` | | 매도RSI - 매수RSI. 양수면 과매수 방향으로 진행 |
+
+#### [J] 리스크 파생 피처 (4개) — 거래 중 위험 신호
+
+| 컬럼 | 설명 |
+|------|------|
+| `sl_distance_pct` | 손절선까지 남은 거리% — 작을수록 위험했던 거래 |
+| `position_age_days` | 보유 일수 (hold_hours / 24) |
+| `intra_trade_drawdown` | 보유 중 최고 PnL - 최종 PnL. **높으면 수익을 많이 반납** |
+| `regime_changed` | 매수~매도 사이 레짐 변화 여부 (1=변화) — 레짐 전환이 손실 원인인지 분석 |
+
+### ML 분류 라벨 (v5.69 — 3-class)
+
+22건 표본 분석에서 5-class는 클래스당 ~4건으로 통계적 무의미 → **3-class로 단순화** (Codex/Gemini 합의).
+
+| 클래스 | 조건 | 비율 | 의미 | ML 활용 |
+|--------|------|------|------|---------|
+| **WIN** | PnL ≥ +2% | ~60% | 설계대로 수익 실현 | 정상 패턴 학습 |
+| **NEUTRAL** | -5% ~ +2% | ~25% | 노이즈/보합/소폭 손실 | 경계 조건 학습 |
+| **STUCK_LOSS** | PnL ≤ -5% & 7일+ 보유 | ~15% | 구조적 진입 실패 | **집중 학습 대상** — 이 패턴을 사전 감지하는 것이 핵심 |
+
+### quality_score 계산 (v5.65~v5.72)
 
 ```
-alpha_pnl    = PnL - BTC변화율        (시장 수익 제거, 순수 진입 품질)
+alpha_pnl    = PnL - BTC변화율       ← 시장 수익 제거, 순수 진입 품질
+pnl_score    = alpha_pnl / 10        ← [-1, +1] 정규화
+time_score   = PnL / log2(보유시간+1) ← v5.72: 비선형, 짧은 거래 과대평가 방지
+risk_score   = PnL / 변동성           ← 위험 대비 수익
+regime_score = 레짐 보너스 + pnl      ← BULL +0.3, BEAR -0.2
+path_penalty = (최고PnL - 최종PnL) × 0.015  ← 수익 반납 감점, 최대 -0.3
+
 quality_score = 0.4×pnl + 0.1×time + 0.3×risk + 0.2×regime - path_penalty
 ```
 
-### ML 분류 라벨 (3-class)
+### 버전별 ML 피처 추가 이력
 
-| 클래스 | 조건 | 비율 |
-|--------|------|------|
-| WIN | PnL ≥ +2% | ~60% |
-| NEUTRAL | -5% ~ +2% | ~25% |
-| STUCK_LOSS | PnL ≤ -5% & 7일+ 보유 | ~15% |
+| 버전 | 추가 피처 | 배경 |
+|------|-----------|------|
+| v5.52 | 기본 37컬럼 (A~F + quality_score) | ML 파이프라인 최초 구축 |
+| v5.63 | max_pnl 경로 안정성 페널티 | MFE 15%→최종 3%인 거래와 0%→3%인 거래 구분 |
+| v5.65 | alpha_pnl, btc_change_pct 지원 | raw PnL = beta+alpha 혼재 → 상승장 과적합 방지 |
+| v5.67 | entry_is_night, entry_day_of_week | 83% 야간 매수 편중 발견 → 시간대별 품질 분석 |
+| v5.69 | trade_class 3-class 분류 | 소표본에서 regression보다 견고한 classification |
+| v5.72 | mfe_capture_ratio, time_efficiency log2 | MFE 포착률로 진입품질 vs 운 분리, 짧은 거래 편향 제거 |
+| v5.75 | tp1_reached, regime_tp1_pct | TP1 도달 이진 분류 + 레짐 TP1 기준 기록 |
+| v5.77 | is_stuck, loss_band | stuck 포지션 사전 감지 + 손실 구간 세분화 |
+| v5.80 | tp2_reached, distance_to_tp2_pct, mfe_to_tp1_ratio | TP2 ML 피처 3종 + SIGNAL TP가드 |
+| v5.84 | MAE (low_pnl) | 보유 중 최저 PnL 추적 — MFE의 반대 개념 |
+| v5.86 | dca_exhausted | DCA 고갈 패턴 학습 |
+| v5.89 | catastrophic_distance_pct, distance_to_tp1_pct | CATASTROPHIC/TP1 까지 거리 학습 |
+| v5.91 | portfolio_slot_ratio 외 4종 | 청산 시점 포트폴리오 상태 |
+| v5.97 | stuck_penalty | 7일+ 체류 기회비용 감점 (quality_score) |
+| v5.99 | is_weekend, exit_day_of_week, exit_hour_kst | 주말/시간 피처 + STUCK_CLEANUP 90→60일 |
+| v6.01 | score_*_pts (6종), btc_volatility_24h, ml_regime_group | 스코어 팩터 분해 + BTC 변동성 + 레짐 그룹 |
+| v6.02~v6.06 | entry_market_breadth_pct 외 8종 | 포트폴리오 건강도 피처 확장 |
+| v6.07~v6.12 | dead_money, PnL 분산도, TP1 gap 등 | 진입 품질 정밀화 피처 |
 
 ---
 
