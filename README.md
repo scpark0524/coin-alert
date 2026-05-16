@@ -17,10 +17,6 @@
 | 일평균 실현수익 | +8,900원 |
 | BEP 도달 | 33일 (4/14) |
 
-### 수익 곡선
-
-![cumulative returns](docs/cumulative_returns.png)
-
 ### 매도 사유별 성과
 
 | 사유 | 건수 | 평균 수익률 | 승률 |
